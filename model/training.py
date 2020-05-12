@@ -12,8 +12,8 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from model.modules import LatentModel
-from model.utils import AverageMeter, NamedTensorDataset
+from model.modules import Generator, MsImageDis
+from model.utils import NamedTensorDataset
 
 
 class SLord:
@@ -24,9 +24,12 @@ class SLord:
 		self.config = config
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-		self.latent_model = LatentModel(self.config)
-		self.latent_model.init()
-		self.latent_model.to(self.device)
+		self.generator = Generator(self.config)
+		self.generator.init()
+		self.generator.to(self.device)
+
+		self.discriminator = MsImageDis()
+		self.discriminator.to(self.device)
 
 		self.rs = np.random.RandomState(seed=1337)
 
@@ -36,7 +39,7 @@ class SLord:
 			config = pickle.load(config_fd)
 
 		slord = SLord(config)
-		slord.latent_model.load_state_dict(torch.load(os.path.join(model_dir, 'latent.pth')))
+		slord.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
 
 		return slord
 
@@ -44,7 +47,7 @@ class SLord:
 		with open(os.path.join(model_dir, 'config.pkl'), 'wb') as config_fd:
 			pickle.dump(self.config, config_fd)
 
-		torch.save(self.latent_model.state_dict(), os.path.join(model_dir, 'latent.pth'))
+		torch.save(self.generator.state_dict(), os.path.join(model_dir, 'generator.pth'))
 
 	def train_latent(self, imgs, classes, model_dir, tensorboard_dir):
 		data = dict(
@@ -61,60 +64,83 @@ class SLord:
 
 		reconstruction_loss_fn = L1Loss()
 
-		optimizer = Adam([
+		generator_optimizer = Adam([
 			{
 				'params': itertools.chain(
-					self.latent_model.modulation.parameters(),
-					self.latent_model.generator.parameters()
+					self.generator.modulation.parameters(),
+					self.generator.decoder.parameters()
 				),
 
-				'lr': self.config['train']['learning_rate']['network']
+				'lr': self.config['train']['learning_rate']['generator']
 			},
 			{
 				'params': itertools.chain(
-					self.latent_model.content_embedding.parameters(),
-					self.latent_model.class_embedding.parameters()
+					self.generator.content_embedding.parameters(),
+					self.generator.class_embedding.parameters()
 				),
 
 				'lr': self.config['train']['learning_rate']['latent']
 			}
 		], betas=(0.5, 0.999))
 
-		scheduler = CosineAnnealingLR(
-			optimizer,
-			T_max=self.config['train']['n_epochs'] * len(data_loader),
-			eta_min=self.config['train']['learning_rate']['min']
-		)
+		discriminator_optimizer = Adam([
+			{
+				'params': self.discriminator.parameters(),
+				'lr': self.config['train']['learning_rate']['discriminator']
+			}
+		], betas=(0.5, 0.999))
+
+		# generator_scheduler = CosineAnnealingLR(
+		# 	generator_optimizer,
+		# 	T_max=self.config['train']['n_epochs'] * len(data_loader),
+		# 	eta_min=self.config['train']['learning_rate']['min']
+		# )
+		#
+		# discriminator_scheduler = CosineAnnealingLR(
+		# 	discriminator_optimizer,
+		# 	T_max=self.config['train']['n_epochs'] * len(data_loader),
+		# 	eta_min=self.config['train']['learning_rate']['min']
+		# )
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
-		train_loss = AverageMeter()
-
 		for epoch in range(self.config['train']['n_epochs']):
-			self.latent_model.train()
-			train_loss.reset()
+			self.generator.train()
+			self.discriminator.train()
 
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
+				out = self.generator(batch['img_id'], batch['class_id'])
 
-				optimizer.zero_grad()
-				out = self.latent_model(batch['img_id'], batch['class_id'])
+				discriminator_optimizer.zero_grad()
+				loss_discriminator = self.discriminator.calc_dis_loss(out['img'].detach(), batch['img'])
 
+				loss_discriminator.backward()
+				discriminator_optimizer.step()
+				# discriminator_scheduler.step()
+
+				generator_optimizer.zero_grad()
 				loss_reconstruction = reconstruction_loss_fn(out['img'], batch['img'])
 				loss_content = torch.sum(out['content_code'] ** 2, dim=1).mean()
-				loss = loss_reconstruction + self.config['content_decay'] * loss_content
+				loss_adversarial = self.discriminator.calc_gen_loss(out['img'])
 
-				loss.backward()
-				optimizer.step()
-				scheduler.step()
+				loss_generator = (
+					self.config['train']['loss_weights']['reconstruction'] * loss_reconstruction
+					+ self.config['train']['loss_weights']['content'] * loss_content
+					+ self.config['train']['loss_weights']['adversarial'] * loss_adversarial
+				)
 
-				train_loss.update(loss.item())
+				loss_generator.backward()
+				generator_optimizer.step()
+				# generator_scheduler.step()
+
 				pbar.set_description_str('epoch #{}'.format(epoch))
-				pbar.set_postfix(loss=train_loss.avg)
+				pbar.set_postfix(gen_loss=loss_generator.item(), disc_loss=loss_discriminator.item())
 
 			pbar.close()
 
-			summary.add_scalar(tag='loss', scalar_value=train_loss.avg, global_step=epoch)
+			summary.add_scalar(tag='loss-generator', scalar_value=loss_generator.item(), global_step=epoch)
+			summary.add_scalar(tag='loss-discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
 
 			samples_fixed = self.generate_samples(dataset, randomized=False)
 			samples_random = self.generate_samples(dataset, randomized=True)
@@ -127,7 +153,7 @@ class SLord:
 		summary.close()
 
 	def generate_samples(self, dataset, n_samples=5, randomized=False):
-		self.latent_model.eval()
+		self.generator.eval()
 
 		random = self.rs if randomized else np.random.RandomState(seed=0)
 		img_idx = torch.from_numpy(random.choice(len(dataset), size=n_samples, replace=False))
@@ -141,7 +167,7 @@ class SLord:
 			converted_imgs = [samples['img'][i]]
 
 			for j in range(n_samples):
-				out = self.latent_model(samples['img_id'][[j]], samples['class_id'][[i]])
+				out = self.generator(samples['img_id'][[j]], samples['class_id'][[i]])
 				converted_imgs.append(out['img'][0])
 
 			output.append(torch.cat(converted_imgs, dim=2))
