@@ -290,7 +290,7 @@ class MsImageDis(nn.Module):
 		self.dim = 64
 		self.norm = 'none'
 		self.activ = 'lrelu'
-		self.num_scales = 3
+		self.num_scales = 1
 		self.pad_type = 'reflect'
 		self.input_dim = 3
 		self.downsample = nn.AvgPool2d(3, stride=2, padding=[1, 1], count_include_pad=False)

@@ -9,8 +9,8 @@ base_config = dict(
 	adain_dim=256,
 
 	train=dict(
-		batch_size=128,
-		n_epochs=200,
+		batch_size=64,
+		n_epochs=1000,
 
 		learning_rate=dict(
 			latent=1e-3,
