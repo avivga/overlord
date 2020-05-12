@@ -155,21 +155,22 @@ class SLord:
 	def generate_samples(self, dataset, n_samples=5, randomized=False):
 		self.generator.eval()
 
-		random = self.rs if randomized else np.random.RandomState(seed=0)
-		img_idx = torch.from_numpy(random.choice(len(dataset), size=n_samples, replace=False))
+		with torch.no_grad():
+			random = self.rs if randomized else np.random.RandomState(seed=0)
+			img_idx = torch.from_numpy(random.choice(len(dataset), size=n_samples, replace=False))
 
-		samples = dataset[img_idx]
-		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
+			samples = dataset[img_idx]
+			samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 
-		blank = torch.ones_like(samples['img'][0])
-		output = [torch.cat([blank] + list(samples['img']), dim=2)]
-		for i in range(n_samples):
-			converted_imgs = [samples['img'][i]]
+			blank = torch.ones_like(samples['img'][0])
+			output = [torch.cat([blank] + list(samples['img']), dim=2)]
+			for i in range(n_samples):
+				converted_imgs = [samples['img'][i]]
 
-			for j in range(n_samples):
-				out = self.generator(samples['img_id'][[j]], samples['class_id'][[i]])
-				converted_imgs.append(out['img'][0])
+				for j in range(n_samples):
+					out = self.generator(samples['img_id'][[j]], samples['class_id'][[i]])
+					converted_imgs.append(out['img'][0])
 
-			output.append(torch.cat(converted_imgs, dim=2))
+				output.append(torch.cat(converted_imgs, dim=2))
 
-		return torch.cat(output, dim=1)
+			return torch.cat(output, dim=1)
