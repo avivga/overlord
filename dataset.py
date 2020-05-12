@@ -1,7 +1,11 @@
 import os
+import argparse
 from abc import ABC, abstractmethod
 
+import imageio
 import numpy as np
+import scipy.io
+import cv2
 
 
 class DataSet(ABC):
@@ -42,6 +46,65 @@ class Cars3D(DataSet):
 		}
 
 
+class Cub(DataSet):
+
+	def __init__(self, base_dir, extras):
+		super().__init__(base_dir)
+
+		parser = argparse.ArgumentParser()
+		parser.add_argument('-sp', '--split', type=str, choices=['train', 'val'], required=True)
+		parser.add_argument('-is', '--img-size', type=int, default=256)
+
+		args = parser.parse_args(extras)
+		self.__dict__.update(vars(args))
+
+	def read(self):
+		data = scipy.io.loadmat(os.path.join(self._base_dir, 'from_cmr', 'data', '{}_cub_cleaned.mat'.format(self.split)), struct_as_record=False, squeeze_me=True)
+
+		n_images = data['images'].shape[0]
+		imgs = []
+		categories = []
+
+		for i in range(n_images):
+			img_struct = data['images'][i]
+			img_path = os.path.join(self._base_dir, 'images', img_struct.rel_path)
+
+			img = imageio.imread(img_path)
+			if len(img.shape) == 2:
+				img = np.tile(img[..., np.newaxis], reps=(1, 1, 3))
+
+			img_masked = img * img_struct.mask[..., np.newaxis]
+			bbox = dict(
+				x1=img_struct.bbox.x1 - 1, x2=img_struct.bbox.x2 - 1,
+				y1=img_struct.bbox.y1 - 1, y2=img_struct.bbox.y2 - 1
+			)
+
+			height = bbox['y2'] - bbox['y1'] + 1
+			width = bbox['x2'] - bbox['x1'] + 1
+			box_length = max(width, height)
+
+			y1 = max(bbox['y1'] - (box_length - height) // 2, 0)
+			y2 = y1 + box_length - 1
+
+			x1 = max(bbox['x1'] - (box_length - width) // 2, 0)
+			x2 = x1 + box_length - 1
+
+			img_cropped = img_masked[y1:y2, x1:x2]
+			imgs.append(cv2.resize(img_cropped, dsize=(self.img_size, self.img_size)))
+
+			category_id = img_struct.rel_path.split('/')[0]
+			categories.append(category_id)
+
+		unique_categories = list(set(categories))
+		categories = list(map(lambda c: unique_categories.index(c), categories))
+
+		return {
+			'img': np.stack(imgs, axis=0),
+			'class': np.array(categories)
+		}
+
+
 supported_datasets = {
-	'cars3d': Cars3D
+	'cars3d': Cars3D,
+	'cub': Cub
 }
