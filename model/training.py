@@ -6,12 +6,13 @@ from tqdm import tqdm
 import numpy as np
 
 import torch
+from torch.nn import L1Loss
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from model.modules import LatentModel, VGGDistance
+from model.modules import LatentModel
 from model.utils import AverageMeter, NamedTensorDataset
 
 
@@ -58,7 +59,7 @@ class SLord:
 			shuffle=True, pin_memory=True, drop_last=False
 		)
 
-		reconstruction_loss_fn = VGGDistance(self.config['perceptual_loss']['layers']).to(self.device)
+		reconstruction_loss_fn = L1Loss()
 
 		optimizer = Adam([
 			{
