@@ -3,10 +3,16 @@ base_config = dict(
 	class_dim=256,
 
 	content_std=0,
-	content_decay=0,
 
-	n_adain_layers=4,
-	adain_dim=256,
+	generator=dict(
+		n_adain_layers=4,
+		adain_dim=256
+	),
+
+	discriminator=dict(
+		n_layers=4,
+		filters=64
+	),
 
 	train=dict(
 		batch_size=64,

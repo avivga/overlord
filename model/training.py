@@ -12,7 +12,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from model.modules import Generator, MsImageDis
+from model.modules import Generator, Discriminator
 from model.utils import NamedTensorDataset
 
 
@@ -28,7 +28,7 @@ class SLord:
 		self.generator.init()
 		self.generator.to(self.device)
 
-		self.discriminator = MsImageDis()
+		self.discriminator = Discriminator(self.config)
 		self.discriminator.to(self.device)
 
 		self.rs = np.random.RandomState(seed=1337)
@@ -40,6 +40,7 @@ class SLord:
 
 		slord = SLord(config)
 		slord.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
+		slord.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
 
 		return slord
 
@@ -48,6 +49,7 @@ class SLord:
 			pickle.dump(self.config, config_fd)
 
 		torch.save(self.generator.state_dict(), os.path.join(model_dir, 'generator.pth'))
+		torch.save(self.discriminator.state_dict(), os.path.join(model_dir, 'discriminator.pth'))
 
 	def train_latent(self, imgs, classes, model_dir, tensorboard_dir):
 		data = dict(
@@ -113,16 +115,21 @@ class SLord:
 				out = self.generator(batch['img_id'], batch['class_id'])
 
 				discriminator_optimizer.zero_grad()
-				loss_discriminator = self.discriminator.calc_dis_loss(out['img'].detach(), batch['img'])
+
+				discriminator_fake = self.discriminator(out['img'].detach(), batch['class_id'])
+				discriminator_real = self.discriminator(batch['img'], batch['class_id'])
+				loss_discriminator = torch.mean((discriminator_fake - 0) ** 2) + torch.mean((discriminator_real - 1) ** 2)
 
 				loss_discriminator.backward()
 				discriminator_optimizer.step()
 				# discriminator_scheduler.step()
 
 				generator_optimizer.zero_grad()
+
+				discriminator_fake = self.discriminator(out['img'], batch['class_id'])
 				loss_reconstruction = reconstruction_loss_fn(out['img'], batch['img'])
 				loss_content = torch.sum(out['content_code'] ** 2, dim=1).mean()
-				loss_adversarial = self.discriminator.calc_gen_loss(out['img'])
+				loss_adversarial = torch.mean((discriminator_fake - 1) ** 2)
 
 				loss_generator = (
 					self.config['train']['loss_weights']['reconstruction'] * loss_reconstruction
