@@ -7,6 +7,8 @@ import numpy as np
 import scipy.io
 import cv2
 
+from dataset_pascal import Pascal
+
 
 class DataSet(ABC):
 
@@ -104,7 +106,35 @@ class Cub(DataSet):
 		}
 
 
+class Pascal3D(DataSet):
+
+	def __init__(self, base_dir, extras):
+		super().__init__(base_dir)
+
+		parser = argparse.ArgumentParser()
+		parser.add_argument('-sp', '--split', type=str, choices=['train', 'val'], required=True)
+		parser.add_argument('-ct', '--category', type=str, required=True)
+		parser.add_argument('-cp', '--classes-path', type=str, required=True)
+		parser.add_argument('-is', '--img-size', type=int, default=128)
+
+		args = parser.parse_args(extras)
+		self.__dict__.update(vars(args))
+
+	def read(self):
+		pascal = Pascal(directory=self._base_dir, class_ids=[self.category], set_name=self.split)
+
+		imgs = pascal.images_ref[self.category].transpose(0, 2, 3, 1)[..., :3]
+		imgs = imgs[:, :, ::-1, :]
+		imgs = [cv2.resize(imgs[i], dsize=(self.img_size, self.img_size)) for i in range(imgs.shape[0])]
+
+		return {
+			'img': np.stack(imgs, axis=0),
+			'class': np.load(self.classes_path)['classes']
+		}
+
+
 supported_datasets = {
 	'cars3d': Cars3D,
-	'cub': Cub
+	'cub': Cub,
+	'pascal3d': Pascal3D
 }
