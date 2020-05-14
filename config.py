@@ -5,12 +5,12 @@ base_config = dict(
 	content_std=0,
 
 	generator=dict(
-		n_adain_layers=4,
+		n_adain_layers=5,
 		adain_dim=256
 	),
 
 	discriminator=dict(
-		n_layers=4,
+		n_layers=5,
 		filters=64
 	),
 
@@ -28,7 +28,7 @@ base_config = dict(
 		loss_weights=dict(
 			reconstruction=1,
 			content=0,
-			adversarial=0.1
+			adversarial=0.01
 		)
 	)
 )
