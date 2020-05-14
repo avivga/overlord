@@ -160,6 +160,7 @@ class SLord:
 
 			summary.add_scalar(tag='loss-generator', scalar_value=loss_generator.item(), global_step=epoch)
 			summary.add_scalar(tag='loss-discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
+			summary.add_scalar(tag='loss-reconstruction', scalar_value=loss_reconstruction.item(), global_step=epoch)
 
 			samples_fixed = self.generate_samples(dataset, randomized=False)
 			samples_random = self.generate_samples(dataset, randomized=True)

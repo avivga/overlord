@@ -171,28 +171,34 @@ class Discriminator(nn.Module):
 			out_channels = 2 * in_channels if i > 0 else self.config['discriminator']['filters']
 
 			layers += [
-				nn.Conv2d(in_channels, out_channels, kernel_size=4, stride=2, padding=1),
+				nn.ReflectionPad2d(padding=1),
+				nn.Conv2d(in_channels, out_channels, kernel_size=4, stride=2),
 				nn.LeakyReLU(negative_slope=0.2, inplace=True)
 			]
 
+		layers += [
+			nn.Conv2d(in_channels=out_channels, out_channels=1, kernel_size=1, stride=1)
+		]
+
 		self.convs = nn.Sequential(*layers)
 
-		self.linear = nn.Linear(
-			in_features=self.config['discriminator']['filters'] * (2 ** (self.config['discriminator']['n_layers'] - 1)),
-			out_features=1
-		)
-
-		self.class_embedding = nn.Embedding(
-			num_embeddings=config['n_classes'],
-			embedding_dim=self.config['discriminator']['filters'] * (2 ** (self.config['discriminator']['n_layers'] - 1))
-		)
+		# self.linear = nn.Linear(
+		# 	in_features=self.config['discriminator']['filters'] * (2 ** (self.config['discriminator']['n_layers'] - 1)),
+		# 	out_features=1
+		# )
+		#
+		# self.class_embedding = nn.Embedding(
+		# 	num_embeddings=config['n_classes'],
+		# 	embedding_dim=self.config['discriminator']['filters'] * (2 ** (self.config['discriminator']['n_layers'] - 1))
+		# )
 
 	def forward(self, img, class_id):
 		x = self.convs(img)
-		h = torch.sum(x, dim=[2, 3])
+		return x
+		# h = torch.sum(x, dim=[2, 3])
 
-		out = self.linear(h)
-		return out + torch.sum(self.class_embedding(class_id) * h, dim=1, keepdim=True)
+		# out = self.linear(h)
+		# return out + torch.sum(self.class_embedding(class_id) * h, dim=1, keepdim=True)
 
 
 class StyleEncoder(nn.Module):

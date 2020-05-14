@@ -1,7 +1,7 @@
 base_config = dict(
 	content_dim=128,
 	class_dim=256,
-	style_dim=16,
+	style_dim=8,
 
 	content_std=0,
 
@@ -11,7 +11,7 @@ base_config = dict(
 	),
 
 	discriminator=dict(
-		n_layers=5,
+		n_layers=4,
 		filters=64
 	),
 
@@ -34,8 +34,8 @@ base_config = dict(
 		loss_weights=dict(
 			reconstruction=1,
 			content=0,
-			adversarial=0.01,
-			style=0.01
+			adversarial=0.1,
+			style=0
 		)
 	)
 )
