@@ -12,7 +12,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from model.modules import Generator, Discriminator
+from model.modules import Generator, Discriminator, StyleEncoder
 from model.utils import NamedTensorDataset
 
 
@@ -31,6 +31,9 @@ class SLord:
 		self.discriminator = Discriminator(self.config)
 		self.discriminator.to(self.device)
 
+		self.style_encoder = StyleEncoder(self.config)
+		self.style_encoder.to(self.device)
+
 		self.rs = np.random.RandomState(seed=1337)
 
 	@staticmethod
@@ -41,6 +44,7 @@ class SLord:
 		slord = SLord(config)
 		slord.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
 		slord.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
+		slord.style_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'style_encoder.pth')))
 
 		return slord
 
@@ -50,6 +54,7 @@ class SLord:
 
 		torch.save(self.generator.state_dict(), os.path.join(model_dir, 'generator.pth'))
 		torch.save(self.discriminator.state_dict(), os.path.join(model_dir, 'discriminator.pth'))
+		torch.save(self.style_encoder.state_dict(), os.path.join(model_dir, 'style_encoder.pth'))
 
 	def train_latent(self, imgs, classes, model_dir, tensorboard_dir):
 		data = dict(
@@ -70,7 +75,8 @@ class SLord:
 			{
 				'params': itertools.chain(
 					self.generator.modulation.parameters(),
-					self.generator.decoder.parameters()
+					self.generator.decoder.parameters(),
+					self.style_encoder.parameters()
 				),
 
 				'lr': self.config['train']['learning_rate']['generator']
@@ -112,7 +118,9 @@ class SLord:
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
-				out = self.generator(batch['img_id'], batch['class_id'])
+				batch['style'] = torch.randn(batch['img_id'].shape[0], self.config['style_dim']).to(self.device)
+
+				out = self.generator(batch['img_id'], batch['class_id'], batch['style'])
 
 				discriminator_optimizer.zero_grad()
 
@@ -127,14 +135,18 @@ class SLord:
 				generator_optimizer.zero_grad()
 
 				discriminator_fake = self.discriminator(out['img'], batch['class_id'])
+				style_reconstructed = self.style_encoder(out['img'])
+
 				loss_reconstruction = reconstruction_loss_fn(out['img'], batch['img'])
 				loss_content = torch.sum(out['content_code'] ** 2, dim=1).mean()
 				loss_adversarial = torch.mean((discriminator_fake - 1) ** 2)
+				loss_style = reconstruction_loss_fn(style_reconstructed, batch['style'])
 
 				loss_generator = (
 					self.config['train']['loss_weights']['reconstruction'] * loss_reconstruction
 					+ self.config['train']['loss_weights']['content'] * loss_content
 					+ self.config['train']['loss_weights']['adversarial'] * loss_adversarial
+					+ self.config['train']['loss_weights']['style'] * loss_style
 				)
 
 				loss_generator.backward()
@@ -169,13 +181,15 @@ class SLord:
 			samples = dataset[img_idx]
 			samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 
+			styles = torch.randn(n_samples, self.config['style_dim']).to(self.device)
+
 			blank = torch.ones_like(samples['img'][0])
 			output = [torch.cat([blank] + list(samples['img']), dim=2)]
 			for i in range(n_samples):
 				converted_imgs = [samples['img'][i]]
 
 				for j in range(n_samples):
-					out = self.generator(samples['img_id'][[j]], samples['class_id'][[i]])
+					out = self.generator(samples['img_id'][[j]], samples['class_id'][[i]], styles[[i]])
 					converted_imgs.append(out['img'][0])
 
 				output.append(torch.cat(converted_imgs, dim=2))

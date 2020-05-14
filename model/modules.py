@@ -12,10 +12,10 @@ class Generator(nn.Module):
 
 		self.content_embedding = nn.Embedding(config['n_imgs'], config['content_dim'], config['content_std'])
 		self.class_embedding = nn.Embedding(config['n_classes'], config['class_dim'])
-		self.modulation = Modulation(config['class_dim'], config['generator']['n_adain_layers'], config['generator']['adain_dim'])
+		self.modulation = Modulation(config['class_dim'] + config['style_dim'], config['generator']['n_adain_layers'], config['generator']['adain_dim'])
 		self.decoder = Decoder(config['content_dim'], config['generator']['n_adain_layers'], config['generator']['adain_dim'], config['img_shape'])
 
-	def forward(self, img_id, class_id):
+	def forward(self, img_id, class_id, style_code):
 		content_code = self.content_embedding(img_id)
 
 		if self.training and self.config['content_std'] != 0:
@@ -27,13 +27,14 @@ class Generator(nn.Module):
 			regularized_content_code = content_code
 
 		class_code = self.class_embedding(class_id)
-		class_adain_params = self.modulation(class_code)
+		class_with_style_code = torch.cat((class_code, style_code), dim=1)
+		class_adain_params = self.modulation(class_with_style_code)
+
 		generated_img = self.decoder(regularized_content_code, class_adain_params)
 
 		return {
 			'img': generated_img,
-			'content_code': content_code,
-			'class_code': class_code
+			'content_code': content_code
 		}
 
 	def init(self):
@@ -192,3 +193,35 @@ class Discriminator(nn.Module):
 
 		out = self.linear(h)
 		return out + torch.sum(self.class_embedding(class_id) * h, dim=1, keepdim=True)
+
+
+class StyleEncoder(nn.Module):
+
+	def __init__(self, config):
+		super().__init__()
+
+		self.config = config
+
+		layers = []
+		for i in range(self.config['style_encoder']['n_layers']):
+			in_channels = self.config['style_encoder']['filters'] * (2 ** (i - 1)) if i > 0 else 3
+			out_channels = 2 * in_channels if i > 0 else self.config['style_encoder']['filters']
+
+			layers += [
+				nn.Conv2d(in_channels, out_channels, kernel_size=4, stride=2, padding=1),
+				nn.LeakyReLU(negative_slope=0.2, inplace=True)
+			]
+
+		self.convs = nn.Sequential(*layers)
+
+		self.linear = nn.Linear(
+			in_features=self.config['style_encoder']['filters'] * (2 ** (self.config['style_encoder']['n_layers'] - 1)),
+			out_features=self.config['style_dim']
+		)
+
+	def forward(self, img):
+		x = self.convs(img)
+		h = torch.sum(x, dim=[2, 3])
+
+		out = self.linear(h)
+		return out
