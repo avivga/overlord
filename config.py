@@ -3,7 +3,7 @@ base_config = dict(
 	class_dim=256,
 	style_dim=8,
 
-	content_std=0,
+	content_std=1,
 
 	generator=dict(
 		n_adain_layers=5,
@@ -33,7 +33,7 @@ base_config = dict(
 
 		loss_weights=dict(
 			reconstruction=1,
-			content=0,
+			content=1e-4,
 			adversarial=0.1,
 			style=0
 		)
