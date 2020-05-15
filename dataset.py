@@ -321,10 +321,41 @@ class Beards2Glasses(DataSet):
 		}
 
 
+class AFHQ(DataSet):
+
+	def __init__(self, base_dir, extras):
+		super().__init__(base_dir)
+
+		parser = argparse.ArgumentParser()
+		parser.add_argument('-sp', '--split', type=str, choices=['train', 'val'], required=True)
+		parser.add_argument('-is', '--img-size', type=int, default=128)
+
+		args = parser.parse_args(extras)
+		self.__dict__.update(vars(args))
+
+	def read(self):
+		class_ids = os.listdir(os.path.join(self._base_dir, self.split))
+
+		imgs = []
+		classes = []
+
+		for i, class_id in enumerate(class_ids):
+			class_dir = os.path.join(self._base_dir, self.split, class_id)
+			class_paths = [os.path.join(class_dir, f) for f in os.listdir(class_dir)]
+			imgs.append(np.stack([cv2.resize(imageio.imread(f), dsize=(self.img_size, self.img_size)) for f in class_paths], axis=0))
+			classes.append(np.full((len(class_paths), ), fill_value=i, dtype=np.uint32))
+
+		return {
+			'img': np.concatenate(imgs, axis=0),
+			'class': np.concatenate(classes, axis=0)
+		}
+
+
 supported_datasets = {
 	'cars3d': Cars3D,
 	'cub': Cub,
 	'pascal3d': Pascal3D,
 	'celeba': CelebA,
-	'beard2glasses': Beards2Glasses
+	'beard2glasses': Beards2Glasses,
+	'afhq': AFHQ
 }
