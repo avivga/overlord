@@ -114,6 +114,7 @@ class SLord:
 		for epoch in range(self.config['train']['n_epochs']):
 			self.generator.train()
 			self.discriminator.train()
+			self.style_encoder.train()
 
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
@@ -158,9 +159,10 @@ class SLord:
 
 			pbar.close()
 
-			summary.add_scalar(tag='loss-generator', scalar_value=loss_generator.item(), global_step=epoch)
 			summary.add_scalar(tag='loss-discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
+			summary.add_scalar(tag='loss-generator', scalar_value=loss_generator.item(), global_step=epoch)
 			summary.add_scalar(tag='loss-reconstruction', scalar_value=loss_reconstruction.item(), global_step=epoch)
+			summary.add_scalar(tag='loss-style', scalar_value=loss_style.item(), global_step=epoch)
 
 			samples_fixed = self.generate_samples(dataset, randomized=False)
 			samples_random = self.generate_samples(dataset, randomized=True)
@@ -174,6 +176,7 @@ class SLord:
 
 	def generate_samples(self, dataset, n_samples=5, randomized=False):
 		self.generator.eval()
+		self.style_encoder.eval()
 
 		with torch.no_grad():
 			random = self.rs if randomized else np.random.RandomState(seed=0)
@@ -182,7 +185,7 @@ class SLord:
 			samples = dataset[img_idx]
 			samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 
-			styles = torch.randn(n_samples, self.config['style_dim']).to(self.device)
+			styles = self.style_encoder(samples['img'])
 
 			blank = torch.ones_like(samples['img'][0])
 			output = [torch.cat([blank] + list(samples['img']), dim=2)]
