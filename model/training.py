@@ -96,14 +96,14 @@ class SLord:
 
 				'lr': self.config['train']['learning_rate']['latent']
 			}
-		], betas=(0.5, 0.999))
+		], betas=(0.0, 0.99), weight_decay=1e-4)
 
 		discriminator_optimizer = Adam([
 			{
 				'params': self.discriminator.parameters(),
 				'lr': self.config['train']['learning_rate']['discriminator']
 			}
-		], betas=(0.5, 0.999))
+		], betas=(0.0, 0.99), weight_decay=1e-4)
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['train']['n_epochs']):

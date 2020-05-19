@@ -4,6 +4,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from model.utils import he_init
+
 
 class Generator(nn.Module):
 
@@ -47,6 +49,7 @@ class Generator(nn.Module):
 			# TODO: tanh?
 		)
 
+		self.apply(he_init)
 		self.apply(self.weights_init)
 
 	def forward(self, content_img_id, style_img_id, class_id):
@@ -117,6 +120,8 @@ class Discriminator(nn.Module):
 		blocks += [nn.Conv2d(dim_out, config['n_classes'], 1, 1, 0)]
 		self.main = nn.Sequential(*blocks)
 
+		self.apply(he_init)
+
 	def forward(self, x, y):
 		out = self.main(x)
 		out = out.view(out.size(0), -1)  # (batch, num_domains)
@@ -151,6 +156,8 @@ class StyleEncoder(nn.Module):
 		self.unshared = nn.ModuleList()
 		for _ in range(config['n_classes']):
 			self.unshared += [nn.Linear(dim_out, config['style_dim'])]
+
+		self.apply(he_init)
 
 	def forward(self, x, y):
 		h = self.shared(x)

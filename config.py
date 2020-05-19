@@ -21,8 +21,8 @@ base_config = dict(
 			reconstruction=1,
 			content_decay=0,
 			style_decay=0,
-			adversarial=0,
-			gradient_penalty=0,
+			adversarial=1,
+			gradient_penalty=1,
 			# style_reconstruction=0
 		)
 	)
