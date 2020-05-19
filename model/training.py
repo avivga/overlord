@@ -179,6 +179,9 @@ class SLord:
 			summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=epoch)
 			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
 
+			styles_random = self.generate_samples(dataset, randomized=True, style_only=True)
+			summary.add_image(tag='styles-random', img_tensor=styles_random, global_step=epoch)
+
 			self.save(model_dir)
 
 		summary.close()
@@ -200,7 +203,7 @@ class SLord:
 		reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
 		return reg
 
-	def generate_samples(self, dataset, n_samples=5, randomized=False):
+	def generate_samples(self, dataset, n_samples=5, randomized=False, style_only=False):
 		self.generator.eval()
 		self.style_encoder.eval()
 
@@ -217,7 +220,11 @@ class SLord:
 				converted_imgs = [samples['img'][i]]
 
 				for j in range(n_samples):
-					out = self.generator(samples['img_id'][[j]], samples['img_id'][[i]], samples['class_id'][[i]])
+					class_id_from = j if style_only else i
+					out = self.generator(
+						samples['img_id'][[j]], samples['img_id'][[i]], samples['class_id'][[class_id_from]]
+					)
+
 					converted_imgs.append(out['img'][0])
 
 				summary.append(torch.cat(converted_imgs, dim=2))
