@@ -23,7 +23,7 @@ def train(args):
 	tensorboard_dir = assets.recreate_tensorboard_dir(args.model_name)
 
 	data = np.load(assets.get_preprocess_file_path(args.data_name))
-	imgs = ((data['img'].astype(np.float32) / 255.0) * 2) - 1
+	imgs = data['img'].astype(np.float32) / 255.0
 
 	contents = data['content'] if 'content' in data else None
 

@@ -83,9 +83,8 @@ class SLord:
 			{
 				'params': itertools.chain(
 					self.generator.class_style_modulation.parameters(),
-					self.generator.projection.parameters(),
+					self.generator.modulation.parameters(),
 					self.generator.decoder.parameters(),
-					self.generator.to_rgb.parameters(),
 					self.style_encoder.parameters()
 				),
 
@@ -100,14 +99,14 @@ class SLord:
 
 				'lr': self.config['train']['learning_rate']['latent']
 			}
-		], betas=(0.0, 0.99), weight_decay=1e-4)
+		], betas=(0.5, 0.999))
 
 		discriminator_optimizer = Adam([
 			{
 				'params': self.discriminator.parameters(),
 				'lr': self.config['train']['learning_rate']['discriminator']
 			}
-		], betas=(0.0, 0.99), weight_decay=1e-4)
+		], betas=(0.5, 0.999))
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['train']['n_epochs']):
@@ -269,7 +268,6 @@ class SLord:
 			summary.append(torch.cat(converted_imgs, dim=2))
 
 		summary = torch.cat(summary, dim=1)
-		summary = (summary + 1) / 2
 		return summary
 
 	@staticmethod

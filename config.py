@@ -1,9 +1,9 @@
 base_config = dict(
 	content_dim=128,
 	style_dim=64,
-	class_dim=256,
+	class_dim=64,
 
-	content_std=1,
+	content_std=0,
 	style_std=0,
 
 	train=dict(
@@ -19,7 +19,7 @@ base_config = dict(
 
 		loss_weights=dict(
 			reconstruction=1,
-			content_decay=1e-4,
+			content_decay=0,
 			style_decay=0,
 			adversarial=1,
 			gradient_penalty=1,
