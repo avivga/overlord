@@ -5,6 +5,10 @@ from tqdm import tqdm
 
 import numpy as np
 
+from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+
 import torch
 from torch.nn import L1Loss
 from torch.nn import functional as F
@@ -55,11 +59,12 @@ class SLord:
 		torch.save(self.discriminator.state_dict(), os.path.join(model_dir, 'discriminator.pth'))
 		torch.save(self.style_encoder.state_dict(), os.path.join(model_dir, 'style_encoder.pth'))
 
-	def train_latent(self, imgs, classes, model_dir, tensorboard_dir):
+	def train_latent(self, imgs, classes, contents, model_dir, tensorboard_dir):
 		data = dict(
 			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
 			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
-			class_id=torch.from_numpy(classes.astype(np.int64))
+			class_id=torch.from_numpy(classes.astype(np.int64)),
+			content=torch.from_numpy(contents)
 		)
 
 		class_img_ids = {
@@ -186,6 +191,33 @@ class SLord:
 			styles_random = self.generate_samples(dataset, randomized=True, style_only=True)
 			summary.add_image(tag='styles-random', img_tensor=styles_random, global_step=epoch)
 
+			if epoch % 5 == 0:
+				content_codes, style_codes = self.extract_codes(dataset)
+
+				if self.config['discrete_content']:
+					score_train, score_test = self.classification_score(X=content_codes, y=data['content'].numpy())
+				else:
+					score_train, score_test = self.regression_score(X=content_codes, y=data['content'].numpy())
+
+				summary.add_scalar(tag='content_from_content_train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='content_from_content_test', scalar_value=score_test, global_step=epoch)
+
+				score_train, score_test = self.classification_score(X=content_codes, y=data['class_id'].numpy())
+				summary.add_scalar(tag='class_from_content_train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='class_from_content_test', scalar_value=score_test, global_step=epoch)
+
+				score_train, score_test = self.classification_score(X=style_codes, y=data['class_id'].numpy())
+				summary.add_scalar(tag='class_from_style_train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='class_from_style_test', scalar_value=score_test, global_step=epoch)
+
+				if self.config['discrete_content']:
+					score_train, score_test = self.classification_score(X=style_codes, y=data['content'].numpy())
+				else:
+					score_train, score_test = self.regression_score(X=style_codes, y=data['content'].numpy())
+
+				summary.add_scalar(tag='content_from_style_train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='content_from_style_test', scalar_value=score_test, global_step=epoch)
+
 			self.save(model_dir)
 
 		summary.close()
@@ -238,3 +270,54 @@ class SLord:
 		summary = torch.cat(summary, dim=1)
 		summary = (summary + 1) / 2
 		return summary
+
+	@staticmethod
+	def regression_score(X, y):
+		scaler = StandardScaler()
+		X = scaler.fit_transform(X)
+
+		X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+		regressor = LinearRegression()
+		regressor.fit(X_train, y_train)
+
+		err_train = regressor.score(X_train, y_train)
+		err_test = regressor.score(X_test, y_test)
+
+		return err_train, err_test
+
+	@staticmethod
+	def classification_score(X, y):
+		scaler = StandardScaler()
+		X = scaler.fit_transform(X)
+
+		X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+		classifier = LogisticRegression(random_state=0)
+		classifier.fit(X_train, y_train)
+
+		acc_train = classifier.score(X_train, y_train)
+		acc_test = classifier.score(X_test, y_test)
+
+		return acc_train, acc_test
+
+	@torch.no_grad()
+	def extract_codes(self, dataset):
+		data_loader = DataLoader(dataset, batch_size=128, shuffle=False, pin_memory=True, drop_last=False)
+
+		content_codes = []
+		style_codes = []
+
+		for batch in data_loader:
+			batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
+
+			batch_content_codes = self.generator.content_embedding(batch['img_id'])
+			batch_style_codes = self.style_encoder(batch['img'], batch['class_id'])
+
+			content_codes.append(batch_content_codes.cpu().numpy())
+			style_codes.append(batch_style_codes.cpu().numpy())
+
+		content_codes = np.concatenate(content_codes, axis=0)
+		style_codes = np.concatenate(style_codes, axis=0)
+
+		return content_codes, style_codes

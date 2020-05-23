@@ -6,6 +6,8 @@ base_config = dict(
 	content_std=1,
 	style_std=0,
 
+	discrete_content=True,
+
 	train=dict(
 		batch_size=64,
 		n_epochs=1000,
