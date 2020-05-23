@@ -81,7 +81,7 @@ class Generator(nn.Module):
 		class_with_style_code = self.class_style_modulation(class_with_style_code)
 
 		x = self.projection(regularized_content_code)
-		x = x.view((batch_size, 256, self.initial_size, self.initial_size))
+		x = x.view((batch_size, -1, self.initial_size, self.initial_size))
 
 		for block in self.decoder:
 			x = block(x, class_with_style_code)

@@ -25,6 +25,8 @@ def train(args):
 	data = np.load(assets.get_preprocess_file_path(args.data_name))
 	imgs = ((data['img'].astype(np.float32) / 255.0) * 2) - 1
 
+	contents = data['content'] if 'content' in data else None
+
 	config = dict(
 		img_shape=imgs.shape[1:],
 		n_imgs=imgs.shape[0],
@@ -34,7 +36,7 @@ def train(args):
 	config.update(base_config)
 
 	slord = SLord(config)
-	slord.train_latent(imgs, data['class'], data['content'], model_dir, tensorboard_dir)
+	slord.train_latent(imgs, data['class'], contents, model_dir, tensorboard_dir)
 
 
 def main():

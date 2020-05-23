@@ -63,8 +63,7 @@ class SLord:
 		data = dict(
 			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
 			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
-			class_id=torch.from_numpy(classes.astype(np.int64)),
-			content=torch.from_numpy(contents)
+			class_id=torch.from_numpy(classes.astype(np.int64))
 		)
 
 		class_img_ids = {
@@ -177,10 +176,10 @@ class SLord:
 
 			pbar.close()
 
-			summary.add_scalar(tag='loss-discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
-			summary.add_scalar(tag='loss-generator', scalar_value=loss_generator.item(), global_step=epoch)
-			summary.add_scalar(tag='loss-reconstruction', scalar_value=loss_reconstruction.item(), global_step=epoch)
-			summary.add_scalar(tag='loss-style', scalar_value=loss_style_reconstruction.item(), global_step=epoch)
+			summary.add_scalar(tag='loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
+			summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
+			summary.add_scalar(tag='loss/reconstruction', scalar_value=loss_reconstruction.item(), global_step=epoch)
+			summary.add_scalar(tag='loss/style', scalar_value=loss_style_reconstruction.item(), global_step=epoch)
 
 			samples_fixed = self.generate_samples(dataset, randomized=False)
 			samples_random = self.generate_samples(dataset, randomized=True)
@@ -194,26 +193,28 @@ class SLord:
 			if epoch % 5 == 0:
 				content_codes, style_codes = self.extract_codes(dataset)
 
-				if self.config['discrete_content']:
-					score_train, score_test = self.classification_score(X=content_codes, y=data['content'].numpy())
-				else:
-					score_train, score_test = self.regression_score(X=content_codes, y=data['content'].numpy())
+				if contents is not None:
+					if contents.dtype == np.int64:
+						score_train, score_test = self.classification_score(X=content_codes, y=contents)
+					else:
+						score_train, score_test = self.regression_score(X=content_codes, y=contents)
 
-				summary.add_scalar(tag='content_from_content/train', scalar_value=score_train, global_step=epoch)
-				summary.add_scalar(tag='content_from_content/test', scalar_value=score_test, global_step=epoch)
+					summary.add_scalar(tag='content_from_content/train', scalar_value=score_train, global_step=epoch)
+					summary.add_scalar(tag='content_from_content/test', scalar_value=score_test, global_step=epoch)
 
-				score_train, score_test = self.classification_score(X=content_codes, y=data['class_id'].numpy())
+				score_train, score_test = self.classification_score(X=content_codes, y=classes)
 				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
 				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
 
-				score_train, score_test = self.classification_score(X=style_codes, y=data['class_id'].numpy())
+				score_train, score_test = self.classification_score(X=style_codes, y=classes)
 				summary.add_scalar(tag='class_from_style/train', scalar_value=score_train, global_step=epoch)
 				summary.add_scalar(tag='class_from_style/test', scalar_value=score_test, global_step=epoch)
 
-				if self.config['discrete_content']:
-					score_train, score_test = self.classification_score(X=style_codes, y=data['content'].numpy())
-				else:
-					score_train, score_test = self.regression_score(X=style_codes, y=data['content'].numpy())
+				if contents is not None:
+					if contents.dtype == np.int64:
+						score_train, score_test = self.classification_score(X=style_codes, y=contents)
+					else:
+						score_train, score_test = self.regression_score(X=style_codes, y=contents)
 
 				summary.add_scalar(tag='content_from_style/train', scalar_value=score_train, global_step=epoch)
 				summary.add_scalar(tag='content_from_style/test', scalar_value=score_test, global_step=epoch)
