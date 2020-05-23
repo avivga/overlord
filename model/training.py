@@ -129,15 +129,15 @@ class SLord:
 					style_code = self.style_encoder(batch['target_class_img'], batch['target_class_id'])
 					out = self.generator(batch['img_id'], style_code, batch['target_class_id'])
 
-				batch['img'].requires_grad_()  # for gradient penalty
+				# batch['img'].requires_grad_()  # for gradient penalty
 				discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
 				discriminator_real = self.discriminator(batch['img'], batch['class_id'])
 
 				loss_fake = self.adv_loss(discriminator_fake, 0)
 				loss_real = self.adv_loss(discriminator_real, 1)
-				loss_gp = self.gradient_penalty(discriminator_real, batch['img'])
+				# loss_gp = self.gradient_penalty(discriminator_real, batch['img'])
 
-				loss_discriminator = loss_fake + loss_real + self.config['train']['loss_weights']['gradient_penalty'] * loss_gp
+				loss_discriminator = loss_fake + loss_real  #+ self.config['train']['loss_weights']['gradient_penalty'] * loss_gp
 
 				discriminator_optimizer.zero_grad()
 				loss_discriminator.backward()
@@ -178,6 +178,7 @@ class SLord:
 			summary.add_scalar(tag='loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
 			summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
 			summary.add_scalar(tag='loss/reconstruction', scalar_value=loss_reconstruction.item(), global_step=epoch)
+			summary.add_scalar(tag='loss/adversarial', scalar_value=loss_adversarial.item(), global_step=epoch)
 			summary.add_scalar(tag='loss/style', scalar_value=loss_style_reconstruction.item(), global_step=epoch)
 
 			samples_fixed = self.generate_samples(dataset, randomized=False)
@@ -224,20 +225,23 @@ class SLord:
 
 	def adv_loss(self, logits, target):
 		assert target in [1, 0]
-		targets = torch.full_like(logits, fill_value=target)
-		loss = F.binary_cross_entropy_with_logits(logits, targets)
-		return loss
 
-	def gradient_penalty(self, d_out, x_in):
-		batch_size = x_in.size(0)
-		grad_dout = torch.autograd.grad(
-			outputs=d_out.sum(), inputs=x_in,
-			create_graph=True, retain_graph=True, only_inputs=True
-		)[0]
-		grad_dout2 = grad_dout.pow(2)
-		assert(grad_dout2.size() == x_in.size())
-		reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
-		return reg
+		targets = torch.full_like(logits, fill_value=target)
+		return torch.mean((logits - targets) ** 2)
+
+		# loss = F.binary_cross_entropy_with_logits(logits, targets)
+		# return loss
+
+	# def gradient_penalty(self, d_out, x_in):
+	# 	batch_size = x_in.size(0)
+	# 	grad_dout = torch.autograd.grad(
+	# 		outputs=d_out.sum(), inputs=x_in,
+	# 		create_graph=True, retain_graph=True, only_inputs=True
+	# 	)[0]
+	# 	grad_dout2 = grad_dout.pow(2)
+	# 	assert(grad_dout2.size() == x_in.size())
+	# 	reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
+	# 	return reg
 
 	@torch.no_grad()
 	def generate_samples(self, dataset, n_samples=5, randomized=False, style_only=False):

@@ -19,14 +19,14 @@ class Generator(nn.Module):
 		self.class_embedding = nn.Embedding(config['n_classes'], config['class_dim'])
 
 		self.class_style_modulation = nn.Sequential(
-			nn.Linear(in_features=config['class_dim'] + config['style_dim'], out_features=config['style_dim'] * 2),
+			nn.Linear(in_features=config['class_dim'] + config['style_dim'], out_features=config['class_dim']),
 			nn.LeakyReLU(negative_slope=0.2),
 
-			nn.Linear(in_features=config['style_dim'] * 2, out_features=config['style_dim']),
+			nn.Linear(in_features=config['class_dim'], out_features=config['class_dim']),
 			nn.LeakyReLU(negative_slope=0.2)
 		)
 
-		self.modulation = Modulation(config['style_dim'], n_adain_layers=4, adain_dim=256)
+		self.modulation = Modulation(config['class_dim'], n_adain_layers=4, adain_dim=256)
 		self.decoder = Decoder(config['content_dim'], n_adain_layers=4, adain_dim=256, img_shape=config['img_shape'])
 
 		self.apply(self.weights_init)
@@ -185,36 +185,32 @@ class AdaptiveInstanceNorm2d(nn.Module):
 
 class Discriminator(nn.Module):
 
-	def __init__(self, config, max_conv_dim=512):
+	def __init__(self, config):
 		super().__init__()
 
 		self.config = config
-		img_size = config['img_shape'][0]
+		self.n_filters = 64
 
-		dim_in = 2**14 // img_size
-		blocks = []
-		blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
+		layers = []
+		for i in range(4):
+			in_channels = self.n_filters * (2 ** (i - 1)) if i > 0 else 3
+			out_channels = 2 * in_channels if i > 0 else self.n_filters
 
-		repeat_num = int(np.log2(img_size)) - 2
-		for _ in range(repeat_num):
-			dim_out = min(dim_in*2, max_conv_dim)
-			blocks += [ResBlk(dim_in, dim_out, downsample=True)]
-			dim_in = dim_out
+			layers += [
+				nn.ReflectionPad2d(padding=1),
+				nn.Conv2d(in_channels, out_channels, kernel_size=4, stride=2),
+				nn.LeakyReLU(negative_slope=0.2, inplace=True)
+			]
 
-		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
-		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, config['n_classes'], 1, 1, 0)]
-		self.main = nn.Sequential(*blocks)
+		layers += [
+			nn.Conv2d(in_channels=out_channels, out_channels=1, kernel_size=1, stride=1)
+		]
 
-		self.apply(he_init)
+		self.convs = nn.Sequential(*layers)
 
-	def forward(self, x, y):
-		out = self.main(x)
-		out = out.view(out.size(0), -1)  # (batch, num_domains)
-		idx = torch.LongTensor(range(y.size(0))).to(y.device)
-		out = out[idx, y]  # (batch)
-		return out
+	def forward(self, img, y):
+		x = self.convs(img)
+		return x
 
 
 class StyleEncoder(nn.Module):
