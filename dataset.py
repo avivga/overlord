@@ -33,8 +33,8 @@ class Cars3D(DataSet):
 
 	def read(self):
 		imgs = np.load(self.__data_path)['imgs']
-		classes = np.empty(shape=(imgs.shape[0], ), dtype=np.uint32)
-		contents = np.empty(shape=(imgs.shape[0], ), dtype=np.uint32)
+		classes = np.empty(shape=(imgs.shape[0], ), dtype=np.int64)
+		contents = np.empty(shape=(imgs.shape[0], ), dtype=np.int64)
 
 		for elevation in range(4):
 			for azimuth in range(24):
@@ -46,7 +46,8 @@ class Cars3D(DataSet):
 
 		return {
 			'img': imgs,
-			'class': classes
+			'class': classes,
+			'content': contents
 		}
 
 
@@ -67,7 +68,9 @@ class Cub(DataSet):
 
 		n_images = data['images'].shape[0]
 		imgs = []
+		masks = []
 		categories = []
+		keypoints = []
 
 		for i in range(n_images):
 			img_struct = data['images'][i]
@@ -94,7 +97,24 @@ class Cub(DataSet):
 			x2 = x1 + box_length - 1
 
 			img_cropped = img_masked[y1:y2, x1:x2]
+			mask_cropped = img_struct.mask[y1:y2, x1:x2]
+
+			img_scale = self.img_size / box_length
+
 			imgs.append(cv2.resize(img_cropped, dsize=(self.img_size, self.img_size)))
+			masks.append(cv2.resize(mask_cropped, dsize=(self.img_size, self.img_size)))
+
+			img_keypoints = img_struct.parts.T.astype(np.float32)
+			visible = (img_keypoints[:, 2] > 0)
+			img_keypoints[visible, :2] = img_keypoints[visible, :2] - 1
+
+			img_keypoints[visible, 0] = (img_keypoints[visible, 0] - x1) * img_scale
+			img_keypoints[visible, 0] = 2.0 * (img_keypoints[visible, 0] / self.img_size) - 1
+
+			img_keypoints[visible, 1] = (img_keypoints[visible, 1] - y1) * img_scale
+			img_keypoints[visible, 1] = 2.0 * (img_keypoints[visible, 1] / self.img_size) - 1
+
+			keypoints.append(img_keypoints.reshape((-1, )))
 
 			category_id = img_struct.rel_path.split('/')[0]
 			categories.append(category_id)
@@ -104,7 +124,8 @@ class Cub(DataSet):
 
 		return {
 			'img': np.stack(imgs, axis=0),
-			'class': np.array(categories)
+			'class': np.array(categories),
+			'content': np.stack(keypoints, axis=0)
 		}
 
 
