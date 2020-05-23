@@ -34,7 +34,7 @@ def train(args):
 	config.update(base_config)
 
 	slord = SLord(config)
-	slord.train_latent(imgs, data['class'], model_dir, tensorboard_dir)
+	slord.train_latent(imgs, data['class'], data['content'], model_dir, tensorboard_dir)
 
 
 def main():

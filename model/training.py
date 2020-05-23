@@ -125,7 +125,7 @@ class SLord:
 
 				target_class_img_ids = np.array([np.random.choice(class_img_ids[class_id]) for class_id in target_class_ids])
 				batch['target_class_img_id'] = torch.from_numpy(target_class_img_ids).to(self.device)
-				batch['target_class_img'] = torch.from_numpy(data['img'][target_class_img_ids]).to(self.device)
+				batch['target_class_img'] = data['img'][target_class_img_ids].to(self.device)
 
 				with torch.no_grad():
 					style_code = self.style_encoder(batch['target_class_img'], batch['target_class_id'])
@@ -199,24 +199,24 @@ class SLord:
 				else:
 					score_train, score_test = self.regression_score(X=content_codes, y=data['content'].numpy())
 
-				summary.add_scalar(tag='content_from_content_train', scalar_value=score_train, global_step=epoch)
-				summary.add_scalar(tag='content_from_content_test', scalar_value=score_test, global_step=epoch)
+				summary.add_scalar(tag='content_from_content/train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='content_from_content/test', scalar_value=score_test, global_step=epoch)
 
 				score_train, score_test = self.classification_score(X=content_codes, y=data['class_id'].numpy())
-				summary.add_scalar(tag='class_from_content_train', scalar_value=score_train, global_step=epoch)
-				summary.add_scalar(tag='class_from_content_test', scalar_value=score_test, global_step=epoch)
+				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
 
 				score_train, score_test = self.classification_score(X=style_codes, y=data['class_id'].numpy())
-				summary.add_scalar(tag='class_from_style_train', scalar_value=score_train, global_step=epoch)
-				summary.add_scalar(tag='class_from_style_test', scalar_value=score_test, global_step=epoch)
+				summary.add_scalar(tag='class_from_style/train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='class_from_style/test', scalar_value=score_test, global_step=epoch)
 
 				if self.config['discrete_content']:
 					score_train, score_test = self.classification_score(X=style_codes, y=data['content'].numpy())
 				else:
 					score_train, score_test = self.regression_score(X=style_codes, y=data['content'].numpy())
 
-				summary.add_scalar(tag='content_from_style_train', scalar_value=score_train, global_step=epoch)
-				summary.add_scalar(tag='content_from_style_test', scalar_value=score_test, global_step=epoch)
+				summary.add_scalar(tag='content_from_style/train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='content_from_style/test', scalar_value=score_test, global_step=epoch)
 
 			self.save(model_dir)
 

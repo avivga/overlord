@@ -9,7 +9,7 @@ base_config = dict(
 	discrete_content=True,
 
 	train=dict(
-		batch_size=64,
+		batch_size=32,
 		n_epochs=1000,
 
 		learning_rate=dict(

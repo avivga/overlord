@@ -13,6 +13,7 @@ class Generator(nn.Module):
 		super().__init__()
 
 		self.config = config
+		self.initial_size = config['img_shape'][0] // (2 ** 4)
 
 		self.content_embedding = nn.Embedding(config['n_imgs'], config['content_dim'])
 		# self.style_embedding = nn.Embedding(config['n_imgs'], config['style_dim'])
@@ -31,7 +32,7 @@ class Generator(nn.Module):
 			nn.Linear(in_features=config['content_dim'], out_features=256),
 			nn.LeakyReLU(negative_slope=0.2),
 
-			nn.Linear(in_features=256, out_features=256*4*4),
+			nn.Linear(in_features=256, out_features=256 * self.initial_size * self.initial_size),
 			nn.LeakyReLU(negative_slope=0.2)
 		)
 
@@ -80,7 +81,7 @@ class Generator(nn.Module):
 		class_with_style_code = self.class_style_modulation(class_with_style_code)
 
 		x = self.projection(regularized_content_code)
-		x = x.view((batch_size, 256, 4, 4))
+		x = x.view((batch_size, 256, self.initial_size, self.initial_size))
 
 		for block in self.decoder:
 			x = block(x, class_with_style_code)
