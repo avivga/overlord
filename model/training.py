@@ -93,7 +93,7 @@ class SLord:
 			{
 				'params': itertools.chain(
 					self.generator.content_embedding.parameters(),
-					# self.generator.style_embedding.parameters(),
+					self.generator.style_embedding.parameters(),
 					self.generator.class_embedding.parameters()
 				),
 
@@ -126,8 +126,8 @@ class SLord:
 				batch['target_class_img'] = data['img'][target_class_img_ids].to(self.device)
 
 				with torch.no_grad():
-					style_code = self.style_encoder(batch['target_class_img'], batch['target_class_id'])
-					out = self.generator(batch['img_id'], style_code, batch['target_class_id'])
+					# style_code = self.style_encoder(batch['target_class_img'], batch['target_class_id'])
+					out = self.generator(batch['img_id'], batch['target_class_img_id'], batch['target_class_id'])
 
 				# batch['img'].requires_grad_()  # for gradient penalty
 				discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
@@ -143,17 +143,17 @@ class SLord:
 				loss_discriminator.backward()
 				discriminator_optimizer.step()
 
-				style_code = self.style_encoder(batch['target_class_img'], batch['target_class_id'])
-				out = self.generator(batch['img_id'], style_code, batch['target_class_id'])
+				# style_code = self.style_encoder(batch['target_class_img'], batch['target_class_id'])
+				out = self.generator(batch['img_id'], batch['target_class_img_id'], batch['target_class_id'])
 
 				discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
 				loss_adversarial = self.adv_loss(discriminator_fake, 1)
 
-				style_code_reconstructed = self.style_encoder(out['img'], batch['target_class_id'])
-				loss_style_reconstruction = reconstruction_loss_fn(style_code_reconstructed, style_code)
+				# style_code_reconstructed = self.style_encoder(out['img'], batch['target_class_id'])
+				# loss_style_reconstruction = reconstruction_loss_fn(style_code_reconstructed, style_code)
 
-				style_code_original = self.style_encoder(batch['img'], batch['class_id'])
-				out = self.generator(batch['img_id'], style_code_original, batch['class_id'])
+				# style_code_original = self.style_encoder(batch['img'], batch['class_id'])
+				out = self.generator(batch['img_id'], batch['img_id'], batch['class_id'])
 				loss_reconstruction = reconstruction_loss_fn(out['img'], batch['img'])
 				loss_content_decay = torch.sum(out['content_code'] ** 2, dim=1).mean()
 				loss_style_decay = torch.sum(out['style_code'] ** 2, dim=1).mean()
@@ -163,7 +163,7 @@ class SLord:
 					+ self.config['train']['loss_weights']['content_decay'] * loss_content_decay
 					+ self.config['train']['loss_weights']['style_decay'] * loss_style_decay
 					+ self.config['train']['loss_weights']['adversarial'] * loss_adversarial
-					+ self.config['train']['loss_weights']['style_reconstruction'] * loss_style_reconstruction
+					# + self.config['train']['loss_weights']['style_reconstruction'] * loss_style_reconstruction
 				)
 
 				generator_optimizer.zero_grad()
@@ -179,7 +179,7 @@ class SLord:
 			summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
 			summary.add_scalar(tag='loss/reconstruction', scalar_value=loss_reconstruction.item(), global_step=epoch)
 			summary.add_scalar(tag='loss/adversarial', scalar_value=loss_adversarial.item(), global_step=epoch)
-			summary.add_scalar(tag='loss/style', scalar_value=loss_style_reconstruction.item(), global_step=epoch)
+			# summary.add_scalar(tag='loss/style', scalar_value=loss_style_reconstruction.item(), global_step=epoch)
 
 			samples_fixed = self.generate_samples(dataset, randomized=False)
 			samples_random = self.generate_samples(dataset, randomized=True)
@@ -254,7 +254,7 @@ class SLord:
 		samples = dataset[img_idx]
 		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 
-		style_codes = self.style_encoder(samples['img'], samples['class_id'])
+		# style_codes = self.style_encoder(samples['img'], samples['class_id'])
 
 		blank = torch.ones_like(samples['img'][0])
 		summary = [torch.cat([blank] + list(samples['img']), dim=2)]
@@ -264,7 +264,7 @@ class SLord:
 			for j in range(n_samples):
 				class_id_from = j if style_only else i
 				out = self.generator(
-					samples['img_id'][[j]], style_codes[[i]], samples['class_id'][[class_id_from]]
+					samples['img_id'][[j]], samples['img_id'][[i]], samples['class_id'][[class_id_from]]
 				)
 
 				converted_imgs.append(out['img'][0])
@@ -315,7 +315,7 @@ class SLord:
 			batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
 			batch_content_codes = self.generator.content_embedding(batch['img_id'])
-			batch_style_codes = self.style_encoder(batch['img'], batch['class_id'])
+			batch_style_codes = self.generator.style_embedding(batch['img_id'])
 
 			content_codes.append(batch_content_codes.cpu().numpy())
 			style_codes.append(batch_style_codes.cpu().numpy())

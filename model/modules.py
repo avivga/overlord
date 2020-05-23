@@ -15,7 +15,7 @@ class Generator(nn.Module):
 		self.config = config
 
 		self.content_embedding = nn.Embedding(config['n_imgs'], config['content_dim'])
-		# self.style_embedding = nn.Embedding(config['n_imgs'], config['style_dim'])
+		self.style_embedding = nn.Embedding(config['n_imgs'], config['style_dim'])
 		self.class_embedding = nn.Embedding(config['n_classes'], config['class_dim'])
 
 		self.class_style_modulation = nn.Sequential(
@@ -31,10 +31,11 @@ class Generator(nn.Module):
 
 		self.apply(self.weights_init)
 
-	def forward(self, content_img_id, style_code, class_id):
+	def forward(self, content_img_id, style_img_id, class_id):
 		batch_size = content_img_id.shape[0]
 
 		content_code = self.content_embedding(content_img_id)
+		style_code = self.style_embedding(style_img_id)
 		class_code = self.class_embedding(class_id)
 
 		if self.training and self.config['content_std'] != 0:
