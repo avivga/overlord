@@ -15,12 +15,16 @@ class Generator(nn.Module):
 		self.config = config
 
 		self.content_embedding = nn.Embedding(config['n_imgs'], config['content_dim'])
-		self.style_embedding = nn.Embedding(config['n_imgs'], config['style_dim'])
+		# self.style_embedding = nn.Embedding(config['n_imgs'], config['style_dim'])
 		self.class_embedding = nn.Embedding(config['n_classes'], config['class_dim'])
 
-		self.class_style_modulation = nn.Linear(
-			in_features=config['style_dim'] + config['class_dim'],
-			out_features=config['style_dim']
+		self.class_style_modulation = nn.Sequential(
+			nn.Linear(in_features=config['class_dim'] + config['style_dim'], out_features=config['style_dim'] * 2),
+			nn.LeakyReLU(negative_slope=0.2),
+
+			nn.Linear(in_features=config['style_dim'] * 2, out_features=config['style_dim']),
+			nn.LeakyReLU(negative_slope=0.2)
+
 		)
 
 		self.projection = nn.Sequential(
@@ -36,27 +40,24 @@ class Generator(nn.Module):
 			AdainResBlk(dim_in=256, dim_out=256, style_dim=config['style_dim'], upsample=False),
 
 			AdainResBlk(dim_in=256, dim_out=256, style_dim=config['style_dim'], upsample=True),
+			AdainResBlk(dim_in=256, dim_out=256, style_dim=config['style_dim'], upsample=True),
 			AdainResBlk(dim_in=256, dim_out=128, style_dim=config['style_dim'], upsample=True),
-			AdainResBlk(dim_in=128, dim_out=64, style_dim=config['style_dim'], upsample=True),
-			AdainResBlk(dim_in=64, dim_out=32, style_dim=config['style_dim'], upsample=True),
+			AdainResBlk(dim_in=128, dim_out=64, style_dim=config['style_dim'], upsample=True)
 		)
 
 		self.to_rgb = nn.Sequential(
-			nn.InstanceNorm2d(num_features=32, affine=True),
+			nn.InstanceNorm2d(num_features=64, affine=True),
 			nn.LeakyReLU(negative_slope=0.2),
-			nn.Conv2d(in_channels=32, out_channels=3, kernel_size=1, stride=1, padding=0)
-
-			# TODO: tanh?
+			nn.Conv2d(in_channels=64, out_channels=3, kernel_size=1, stride=1, padding=0),
+			nn.Tanh()
 		)
 
 		self.apply(he_init)
-		self.apply(self.weights_init)
 
-	def forward(self, content_img_id, style_img_id, class_id):
+	def forward(self, content_img_id, style_code, class_id):
 		batch_size = content_img_id.shape[0]
 
 		content_code = self.content_embedding(content_img_id)
-		style_code = self.style_embedding(style_img_id)
 		class_code = self.class_embedding(class_id)
 
 		if self.training and self.config['content_std'] != 0:
@@ -89,11 +90,6 @@ class Generator(nn.Module):
 			'content_code': content_code,
 			'style_code': style_code
 		}
-
-	@staticmethod
-	def weights_init(m):
-		if isinstance(m, nn.Embedding):
-			nn.init.uniform_(m.weight, a=-0.05, b=0.05)
 
 
 class Discriminator(nn.Module):
