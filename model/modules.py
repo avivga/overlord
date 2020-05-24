@@ -14,204 +14,138 @@ class Generator(nn.Module):
 
 		self.config = config
 
-		self.content_embedding = nn.Embedding(config['n_imgs'], config['content_dim'])
-		self.style_embedding = nn.Embedding(config['n_imgs'], config['style_dim'])
-		self.class_embedding = nn.Embedding(config['n_classes'], config['class_dim'])
-
-		self.class_style_modulation = nn.Sequential(
-			nn.Linear(in_features=config['class_dim'] + config['style_dim'], out_features=config['class_dim']),
-			nn.LeakyReLU(negative_slope=0.2),
-
-			nn.Linear(in_features=config['class_dim'], out_features=config['class_dim']),
-			nn.LeakyReLU(negative_slope=0.2)
+		self.from_rgb = nn.Sequential(
+			nn.Conv2d(in_channels=3, out_channels=256, kernel_size=3, stride=1, padding=1)
 		)
 
-		self.modulation = Modulation(config['class_dim'], n_adain_layers=4, adain_dim=256)
-		self.decoder = Decoder(config['content_dim'], n_adain_layers=4, adain_dim=256, img_shape=config['img_shape'])
+		self.encoder = nn.Sequential(
+			ResBlk(dim_in=256, dim_out=512, normalize=True, downsample=True),
+			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=True),
+			# ResBlk(dim_in=256, dim_out=256, normalize=True, downsample=True),
+			# ResBlk(dim_in=256, dim_out=256, normalize=True, downsample=True),
 
-		self.apply(self.weights_init)
+			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=False),
+			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=False)
+		)
 
-	def forward(self, content_img_id, style_img_id, class_id):
-		batch_size = content_img_id.shape[0]
+		self.decoder = nn.Sequential(
+			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['style_dim'], upsample=False),
+			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['style_dim'], upsample=False),
 
-		content_code = self.content_embedding(content_img_id)
-		style_code = self.style_embedding(style_img_id)
-		class_code = self.class_embedding(class_id)
+			# AdainResBlk(dim_in=256, dim_out=256, style_dim=config['style_dim'], upsample=True),
+			# AdainResBlk(dim_in=256, dim_out=256, style_dim=config['style_dim'], upsample=True),
+			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['style_dim'], upsample=True),
+			AdainResBlk(dim_in=512, dim_out=256, style_dim=config['style_dim'], upsample=True)
+		)
 
+		self.to_rgb = nn.Sequential(
+			nn.InstanceNorm2d(num_features=256, affine=True),
+			nn.LeakyReLU(negative_slope=0.2),
+			nn.Conv2d(in_channels=256, out_channels=3, kernel_size=1, stride=1, padding=0)
+
+			# TODO: tanh?
+		)
+
+		self.apply(he_init)
+
+	def forward(self, content_img, style_code):
+		x = self.from_rgb(content_img)
+
+		for block in self.encoder:
+			x = block(x)
+
+		content_code = x
 		if self.training and self.config['content_std'] != 0:
-			noise = torch.zeros_like(content_code)
+			noise = torch.zeros_like(x)
 			noise.normal_(mean=0, std=self.config['content_std'])
 
-			regularized_content_code = content_code + noise
-		else:
-			regularized_content_code = content_code
+			x = x + noise
 
 		if self.training and self.config['style_std'] != 0:
 			noise = torch.zeros_like(style_code)
 			noise.normal_(mean=0, std=self.config['style_std'])
 
-			regularized_style_code = style_code + noise
-		else:
-			regularized_style_code = style_code
+			style_code = style_code + noise
 
-		class_with_style_code = torch.cat((class_code, regularized_style_code), dim=1)
-		class_with_style_code = self.class_style_modulation(class_with_style_code)
-
-		adain_params = self.modulation(class_with_style_code)
-		generated_img = self.decoder(regularized_content_code, adain_params)
+		for block in self.decoder:
+			x = block(x, style_code)
 
 		return {
-			'img': generated_img,
-			'content_code': content_code,
-			'style_code': style_code
+			'img': self.to_rgb(x),
+			'content_code': content_code.reshape(x.shape[0], -1)
 		}
-
-	@staticmethod
-	def weights_init(m):
-		if isinstance(m, nn.Embedding):
-			nn.init.uniform_(m.weight, a=-0.05, b=0.05)
-
-
-class Modulation(nn.Module):
-
-	def __init__(self, code_dim, n_adain_layers, adain_dim):
-		super().__init__()
-
-		self.__n_adain_layers = n_adain_layers
-		self.__adain_dim = adain_dim
-
-		self.adain_per_layer = nn.ModuleList([
-			nn.Linear(in_features=code_dim, out_features=adain_dim * 2)
-			for _ in range(n_adain_layers)
-		])
-
-	def forward(self, x):
-		adain_all = torch.cat([f(x) for f in self.adain_per_layer], dim=-1)
-		adain_params = adain_all.reshape(-1, self.__n_adain_layers, self.__adain_dim, 2)
-
-		return adain_params
-
-
-class Decoder(nn.Module):
-
-	def __init__(self, content_dim, n_adain_layers, adain_dim, img_shape):
-		super().__init__()
-
-		self.__initial_height = img_shape[0] // (2 ** n_adain_layers)
-		self.__initial_width = img_shape[1] // (2 ** n_adain_layers)
-		self.__adain_dim = adain_dim
-
-		self.fc_layers = nn.Sequential(
-			nn.Linear(
-				in_features=content_dim,
-				out_features=self.__initial_height * self.__initial_width * (adain_dim // 8)
-			),
-
-			nn.LeakyReLU(negative_slope=0.2),
-
-			nn.Linear(
-				in_features=self.__initial_height * self.__initial_width * (adain_dim // 8),
-				out_features=self.__initial_height * self.__initial_width * (adain_dim // 4)
-			),
-
-			nn.LeakyReLU(negative_slope=0.2),
-
-			nn.Linear(
-				in_features=self.__initial_height * self.__initial_width * (adain_dim // 4),
-				out_features=self.__initial_height * self.__initial_width * adain_dim
-			),
-
-			nn.LeakyReLU(negative_slope=0.2),
-		)
-
-		self.adain_conv_layers = nn.ModuleList()
-		for i in range(n_adain_layers):
-			self.adain_conv_layers += [
-				nn.Upsample(scale_factor=(2, 2)),
-				nn.Conv2d(in_channels=adain_dim, out_channels=adain_dim, padding=1, kernel_size=3),
-				nn.LeakyReLU(negative_slope=0.2),
-				AdaptiveInstanceNorm2d(adain_layer_idx=i)
-			]
-
-		self.adain_conv_layers = nn.Sequential(*self.adain_conv_layers)
-
-		self.last_conv_layers = nn.Sequential(
-			nn.Conv2d(in_channels=adain_dim, out_channels=64, padding=2, kernel_size=5),
-			nn.LeakyReLU(negative_slope=0.2),
-
-			nn.Conv2d(in_channels=64, out_channels=img_shape[-1], padding=3, kernel_size=7),
-			nn.Sigmoid()
-		)
-
-	def assign_adain_params(self, adain_params):
-		for m in self.adain_conv_layers.modules():
-			if m.__class__.__name__ == "AdaptiveInstanceNorm2d":
-				m.bias = adain_params[:, m.adain_layer_idx, :, 0]
-				m.weight = adain_params[:, m.adain_layer_idx, :, 1]
-
-	def forward(self, content_code, class_adain_params):
-		self.assign_adain_params(class_adain_params)
-
-		x = self.fc_layers(content_code)
-		x = x.reshape(-1, self.__adain_dim, self.__initial_height, self.__initial_width)
-		x = self.adain_conv_layers(x)
-		x = self.last_conv_layers(x)
-
-		return x
-
-
-class AdaptiveInstanceNorm2d(nn.Module):
-
-	def __init__(self, adain_layer_idx):
-		super().__init__()
-		self.weight = None
-		self.bias = None
-		self.adain_layer_idx = adain_layer_idx
-
-	def forward(self, x):
-		b, c = x.shape[0], x.shape[1]
-
-		x_reshaped = x.contiguous().view(1, b * c, *x.shape[2:])
-		weight = self.weight.contiguous().view(-1)
-		bias = self.bias.contiguous().view(-1)
-
-		out = F.batch_norm(
-			x_reshaped, running_mean=None, running_var=None,
-			weight=weight, bias=bias, training=True
-		)
-
-		out = out.view(b, c, *x.shape[2:])
-		return out
 
 
 class Discriminator(nn.Module):
 
-	def __init__(self, config):
+	def __init__(self, config, max_conv_dim=512):
 		super().__init__()
 
 		self.config = config
-		self.n_filters = 64
+		img_size = config['img_shape'][0]
+
+		dim_in = 256  #2**14 // img_size
+		blocks = []
+		blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
+
+		repeat_num = int(np.log2(img_size)) - 2
+		for _ in range(repeat_num):
+			dim_out = min(dim_in*2, max_conv_dim)
+			blocks += [ResBlk(dim_in, dim_out, downsample=True)]
+			dim_in = dim_out
+
+		blocks += [nn.LeakyReLU(0.2)]
+		blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
+		blocks += [nn.LeakyReLU(0.2)]
+		blocks += [nn.Conv2d(dim_out, config['n_classes'], 1, 1, 0)]
+		self.main = nn.Sequential(*blocks)
+
+		self.apply(he_init)
+
+	def forward(self, x, y):
+		out = self.main(x)
+		out = out.view(out.size(0), -1)  # (batch, num_domains)
+		idx = torch.LongTensor(range(y.size(0))).to(y.device)
+		out = out[idx, y]  # (batch)
+		return out
+
+
+class MappingNetwork(nn.Module):
+
+	def __init__(self, config, latent_dim=16):
+		super().__init__()
+
+		self.config = config
 
 		layers = []
-		for i in range(4):
-			in_channels = self.n_filters * (2 ** (i - 1)) if i > 0 else 3
-			out_channels = 2 * in_channels if i > 0 else self.n_filters
+		layers += [nn.Linear(latent_dim, 512)]
+		layers += [nn.ReLU()]
+		for _ in range(3):
+			layers += [nn.Linear(512, 512)]
+			layers += [nn.ReLU()]
+		self.shared = nn.Sequential(*layers)
 
-			layers += [
-				nn.ReflectionPad2d(padding=1),
-				nn.Conv2d(in_channels, out_channels, kernel_size=4, stride=2),
-				nn.LeakyReLU(negative_slope=0.2, inplace=True)
-			]
+		self.unshared = nn.ModuleList()
+		for _ in range(config['n_classes']):
+			self.unshared += [nn.Sequential(nn.Linear(512, 512),
+											nn.ReLU(),
+											nn.Linear(512, 512),
+											nn.ReLU(),
+											nn.Linear(512, 512),
+											nn.ReLU(),
+											nn.Linear(512, config['style_dim']))]
 
-		layers += [
-			nn.Conv2d(in_channels=out_channels, out_channels=1, kernel_size=1, stride=1)
-		]
+		self.apply(he_init)
 
-		self.convs = nn.Sequential(*layers)
-
-	def forward(self, img, y):
-		x = self.convs(img)
-		return x
+	def forward(self, z, y):
+		h = self.shared(z)
+		out = []
+		for layer in self.unshared:
+			out += [layer(h)]
+		out = torch.stack(out, dim=1)  # (batch, num_domains, style_dim)
+		idx = torch.LongTensor(range(y.size(0))).to(y.device)
+		s = out[idx, y]  # (batch, style_dim)
+		return s
 
 
 class StyleEncoder(nn.Module):
@@ -222,7 +156,7 @@ class StyleEncoder(nn.Module):
 		self.config = config
 		img_size = config['img_shape'][0]
 
-		dim_in = 2**14 // img_size
+		dim_in = 256  #2**14 // img_size
 		blocks = []
 		blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
 
