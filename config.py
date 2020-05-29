@@ -5,7 +5,7 @@ base_config = dict(
 	style_std=0,
 
 	train=dict(
-		batch_size=8,
+		batch_size=16,
 		n_epochs=1000,
 
 		learning_rate=dict(
