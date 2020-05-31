@@ -68,7 +68,6 @@ class Cub(DataSet):
 
 		n_images = data['images'].shape[0]
 		imgs = []
-		masks = []
 		categories = []
 		keypoints = []
 
@@ -80,7 +79,6 @@ class Cub(DataSet):
 			if len(img.shape) == 2:
 				img = np.tile(img[..., np.newaxis], reps=(1, 1, 3))
 
-			img_masked = img * img_struct.mask[..., np.newaxis]
 			bbox = dict(
 				x1=img_struct.bbox.x1 - 1, x2=img_struct.bbox.x2 - 1,
 				y1=img_struct.bbox.y1 - 1, y2=img_struct.bbox.y2 - 1
@@ -96,13 +94,10 @@ class Cub(DataSet):
 			x1 = max(bbox['x1'] - (box_length - width) // 2, 0)
 			x2 = x1 + box_length - 1
 
-			img_cropped = img_masked[y1:y2, x1:x2]
-			mask_cropped = img_struct.mask[y1:y2, x1:x2]
+			img_cropped = img[y1:y2, x1:x2]
 
 			img_scale = self.img_size / box_length
-
 			imgs.append(cv2.resize(img_cropped, dsize=(self.img_size, self.img_size)))
-			masks.append(cv2.resize(mask_cropped, dsize=(self.img_size, self.img_size)))
 
 			img_keypoints = img_struct.parts.T.astype(np.float32)
 			visible = (img_keypoints[:, 2] > 0)
