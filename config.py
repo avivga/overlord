@@ -23,7 +23,7 @@ base_config = dict(
 			adversarial=1,
 			gradient_penalty=1,
 			style_reconstruction=1,
-			diversity=2
+			diversity=1
 		)
 	)
 )
