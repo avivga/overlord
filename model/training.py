@@ -10,13 +10,12 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
 import torch
-from torch.nn import L1Loss
 from torch.nn import functional as F
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from model.modules import Generator, Discriminator, StyleEncoder, MappingNetwork
+from model.modules import ContentEncoder, Generator, Discriminator, StyleEncoder, MappingNetwork
 from model.utils import NamedTensorDataset
 
 
@@ -27,6 +26,9 @@ class SLord:
 
 		self.config = config
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+		self.content_encoder = ContentEncoder(self.config)
+		self.content_encoder.to(self.device)
 
 		self.generator = Generator(self.config)
 		self.generator.to(self.device)
@@ -48,6 +50,7 @@ class SLord:
 			config = pickle.load(config_fd)
 
 		slord = SLord(config)
+		slord.content_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'content_encoder.pth')))
 		slord.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
 		slord.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
 		slord.style_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'style_encoder.pth')))
@@ -59,6 +62,7 @@ class SLord:
 		with open(os.path.join(model_dir, 'config.pkl'), 'wb') as config_fd:
 			pickle.dump(self.config, config_fd)
 
+		torch.save(self.content_encoder.state_dict(), os.path.join(model_dir, 'content_encoder.pth'))
 		torch.save(self.generator.state_dict(), os.path.join(model_dir, 'generator.pth'))
 		torch.save(self.discriminator.state_dict(), os.path.join(model_dir, 'discriminator.pth'))
 		torch.save(self.style_encoder.state_dict(), os.path.join(model_dir, 'style_encoder.pth'))
@@ -82,30 +86,33 @@ class SLord:
 			shuffle=True, pin_memory=True, drop_last=False
 		)
 
-		reconstruction_loss_fn = L1Loss()
-
 		generator_optimizer = Adam(
-			params=self.generator.parameters(), lr=self.config['train']['learning_rate']['generator'],
+			params=itertools.chain(self.content_encoder.parameters(), self.generator.parameters()),
+			lr=self.config['train']['learning_rate']['generator'],
 			betas=(0.0, 0.99), weight_decay=1e-4
 		)
 
 		discriminator_optimizer = Adam(
-			params=self.discriminator.parameters(), lr=self.config['train']['learning_rate']['discriminator'],
+			params=self.discriminator.parameters(),
+			lr=self.config['train']['learning_rate']['discriminator'],
 			betas=(0.0, 0.99), weight_decay=1e-4
 		)
 
 		style_encoder_optimizer = Adam(
-			params=self.style_encoder.parameters(), lr=self.config['train']['learning_rate']['style_encoder'],
+			params=self.style_encoder.parameters(),
+			lr=self.config['train']['learning_rate']['style_encoder'],
 			betas=(0.0, 0.99), weight_decay=1e-4
 		)
 
 		mapping_optimizer = Adam(
-			params=self.mapping.parameters(), lr=self.config['train']['learning_rate']['mapping'],
+			params=self.mapping.parameters(),
+			lr=self.config['train']['learning_rate']['mapping'],
 			betas=(0.0, 0.99), weight_decay=1e-4
 		)
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['train']['n_epochs']):
+			self.content_encoder.train()
 			self.generator.train()
 			self.discriminator.train()
 			self.style_encoder.train()
@@ -139,7 +146,11 @@ class SLord:
 				loss_discriminator.backward()
 				discriminator_optimizer.step()
 
-				loss_generator = self.do_generator(batch, sampling=True)
+				losses_generator = self.do_generator(batch, sampling=True)
+				loss_generator = 0
+				for term, loss in losses_generator.items():
+					loss_generator += self.config['train']['loss_weights'][term] * loss
+
 				generator_optimizer.zero_grad()
 				mapping_optimizer.zero_grad()
 				style_encoder_optimizer.zero_grad()
@@ -148,7 +159,11 @@ class SLord:
 				mapping_optimizer.step()
 				style_encoder_optimizer.step()
 
-				loss_generator = self.do_generator(batch, sampling=False)
+				losses_generator = self.do_generator(batch, sampling=False)
+				loss_generator = 0
+				for term, loss in losses_generator.items():
+					loss_generator += self.config['train']['loss_weights'][term] * loss
+
 				generator_optimizer.zero_grad()
 				loss_generator.backward()
 				generator_optimizer.step()
@@ -160,9 +175,9 @@ class SLord:
 
 			summary.add_scalar(tag='loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
 			summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
-			# summary.add_scalar(tag='loss/reconstruction', scalar_value=loss_reconstruction.item(), global_step=epoch)
-			# summary.add_scalar(tag='loss/adversarial', scalar_value=loss_adversarial.item(), global_step=epoch)
-			# summary.add_scalar(tag='loss/style', scalar_value=loss_style_reconstruction.item(), global_step=epoch)
+
+			for term, loss in losses_generator.items():
+				summary.add_scalar(tag='loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
 
 			samples_fixed = self.generate_samples(dataset, randomized=False)
 			samples_random = self.generate_samples(dataset, randomized=True)
@@ -173,7 +188,12 @@ class SLord:
 			# styles_random = self.generate_samples(dataset, randomized=True, style_only=True)
 			# summary.add_image(tag='styles-random', img_tensor=styles_random, global_step=epoch)
 
-			# if epoch % 5 == 0:
+			if epoch % 5 == 0:
+				content_codes = self.extract_codes(dataset)
+				score_train, score_test = self.classification_score(X=content_codes, y=classes)
+				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
+
 			# 	content_codes, style_codes = self.extract_codes(dataset)
 			#
 			# 	if contents is not None:
@@ -212,10 +232,12 @@ class SLord:
 		else:
 			style_code_target = self.style_encoder(batch['target_class_img'], batch['target_class_id'])
 
-		out = self.generator(batch['img'], style_code_target)
+		with torch.no_grad():
+			content_code = self.content_encoder(batch['img'])
+			generated_img = self.generator(content_code, style_code_target)
 
 		batch['img'].requires_grad_()  # for gradient penalty
-		discriminator_fake = self.discriminator(out['img'].detach(), batch['target_class_id'])
+		discriminator_fake = self.discriminator(generated_img, batch['target_class_id'])
 		discriminator_real = self.discriminator(batch['img'], batch['class_id'])
 
 		loss_fake = self.adv_loss(discriminator_fake, 0)
@@ -231,13 +253,13 @@ class SLord:
 		else:
 			style_code_target = self.style_encoder(batch['target_class_img'], batch['target_class_id'])
 
-		out = self.generator(batch['img'], style_code_target)
-		loss_content_decay = torch.sum(out['content_code'] ** 2, dim=1).mean()
+		content_code = self.content_encoder(batch['img'])
+		generated_img = self.generator(content_code, style_code_target)
 
-		discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
+		discriminator_fake = self.discriminator(generated_img, batch['target_class_id'])
 		loss_adversarial = self.adv_loss(discriminator_fake, 1)
 
-		style_code_reconstructed = self.style_encoder(out['img'], batch['target_class_id'])
+		style_code_reconstructed = self.style_encoder(generated_img, batch['target_class_id'])
 		loss_style_reconstruction = torch.mean(torch.abs(style_code_reconstructed - style_code_target))
 
 		if sampling:
@@ -246,26 +268,25 @@ class SLord:
 			style_code_target2 = self.style_encoder(batch['target_class_img2'], batch['target_class_id'])
 
 		with torch.no_grad():
-			out2 = self.generator(batch['img'], style_code_target2)
+			generated_img2 = self.generator(content_code, style_code_target2)
 
-		loss_diversity = torch.mean(torch.abs(out['img'] - out2['img']))
+		loss_diversity = torch.mean(torch.abs(generated_img - generated_img2))
 
 		style_code_original = self.style_encoder(batch['img'], batch['class_id'])
-		out = self.generator(batch['img'], style_code_original)
-		loss_reconstruction = torch.mean(torch.abs(out['img'] - batch['img']))
+		reconstructed_img = self.generator(content_code, style_code_original)
+		loss_reconstruction = torch.mean(torch.abs(reconstructed_img - batch['img']))
 
-		# loss_style_decay = torch.sum(out['style_code'] ** 2, dim=1).mean()
+		loss_content_decay = torch.sum(content_code ** 2).mean()
+		loss_style_decay = torch.sum(style_code_target ** 2).mean()
 
-		loss_generator = (
-				self.config['train']['loss_weights']['reconstruction'] * loss_reconstruction
-				+ self.config['train']['loss_weights']['content_decay'] * loss_content_decay
-				# + self.config['train']['loss_weights']['style_decay'] * loss_style_decay
-				+ self.config['train']['loss_weights']['adversarial'] * loss_adversarial
-				+ self.config['train']['loss_weights']['style_reconstruction'] * loss_style_reconstruction
-				- self.config['train']['loss_weights']['diversity'] * loss_diversity
-		)
-
-		return loss_generator
+		return {
+			'reconstruction': loss_reconstruction,
+			'content_decay': loss_content_decay,
+			'style_decay': loss_style_decay,
+			'adversarial': loss_adversarial,
+			'style_reconstruction': loss_style_reconstruction,
+			'diversity': -loss_diversity
+		}
 
 	def adv_loss(self, logits, target):
 		assert target in [1, 0]
@@ -285,9 +306,10 @@ class SLord:
 		return reg
 
 	@torch.no_grad()
-	def generate_samples(self, dataset, n_samples=5, randomized=False, style_only=False):
-		self.generator.eval()
+	def generate_samples(self, dataset, n_samples=10, randomized=False):
+		self.content_encoder.eval()
 		self.style_encoder.eval()
+		self.generator.eval()
 
 		random = self.rs if randomized else np.random.RandomState(seed=0)
 		img_idx = torch.from_numpy(random.choice(len(dataset), size=n_samples, replace=False))
@@ -295,6 +317,7 @@ class SLord:
 		samples = dataset[img_idx]
 		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 
+		content_codes = self.content_encoder(samples['img'])
 		style_codes = self.style_encoder(samples['img'], samples['class_id'])
 
 		blank = torch.ones_like(samples['img'][0])
@@ -303,12 +326,8 @@ class SLord:
 			converted_imgs = [samples['img'][i]]
 
 			for j in range(n_samples):
-				class_id_from = j if style_only else i
-				out = self.generator(
-					samples['img'][[j]], style_codes[[class_id_from]]
-				)
-
-				converted_imgs.append(out['img'][0])
+				out = self.generator(content_codes[[j]], style_codes[[i]])
+				converted_imgs.append(out[0])
 
 			summary.append(torch.cat(converted_imgs, dim=2))
 
@@ -346,23 +365,18 @@ class SLord:
 
 		return acc_train, acc_test
 
-	# @torch.no_grad()
-	# def extract_codes(self, dataset):
-	# 	data_loader = DataLoader(dataset, batch_size=128, shuffle=False, pin_memory=True, drop_last=False)
-	#
-	# 	content_codes = []
-	# 	style_codes = []
-	#
-	# 	for batch in data_loader:
-	# 		batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
-	#
-	# 		batch_content_codes = self.generator.content_embedding(batch['img_id'])
-	# 		batch_style_codes = self.generator.style_embedding(batch['img_id'])
-	#
-	# 		content_codes.append(batch_content_codes.cpu().numpy())
-	# 		style_codes.append(batch_style_codes.cpu().numpy())
-	#
-	# 	content_codes = np.concatenate(content_codes, axis=0)
-	# 	style_codes = np.concatenate(style_codes, axis=0)
-	#
-	# 	return content_codes, style_codes
+	@torch.no_grad()
+	def extract_codes(self, dataset):
+		self.content_encoder.eval()
+
+		data_loader = DataLoader(dataset, batch_size=128, shuffle=False, pin_memory=True, drop_last=False)
+
+		content_codes = []
+		for batch in data_loader:
+			batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
+
+			batch_content_codes = self.content_encoder(batch['img']).view((batch['img'].shape[0], -1))
+			content_codes.append(batch_content_codes.cpu().numpy())
+
+		content_codes = np.concatenate(content_codes, axis=0)
+		return content_codes

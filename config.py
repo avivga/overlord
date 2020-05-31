@@ -1,11 +1,12 @@
 base_config = dict(
+	content_depth=32,
 	style_dim=64,
 
 	content_std=1,
 	style_std=0,
 
 	train=dict(
-		batch_size=16,
+		batch_size=8,
 		n_epochs=1000,
 
 		learning_rate=dict(

@@ -14,52 +14,31 @@ class Generator(nn.Module):
 
 		self.config = config
 
-		self.from_rgb = nn.Sequential(
-			nn.Conv2d(in_channels=3, out_channels=256, kernel_size=3, stride=1, padding=1)
-		)
-
-		self.encoder = nn.Sequential(
-			ResBlk(dim_in=256, dim_out=512, normalize=True, downsample=True),
-			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=True),
-			# ResBlk(dim_in=256, dim_out=256, normalize=True, downsample=True),
-			# ResBlk(dim_in=256, dim_out=256, normalize=True, downsample=True),
-
-			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=False),
-			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=False)
-		)
-
 		self.decoder = nn.Sequential(
-			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['style_dim'], upsample=False),
+			AdainResBlk(dim_in=config['content_depth'], dim_out=512, style_dim=config['style_dim'], upsample=False),
 			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['style_dim'], upsample=False),
 
-			# AdainResBlk(dim_in=256, dim_out=256, style_dim=config['style_dim'], upsample=True),
-			# AdainResBlk(dim_in=256, dim_out=256, style_dim=config['style_dim'], upsample=True),
 			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['style_dim'], upsample=True),
-			AdainResBlk(dim_in=512, dim_out=256, style_dim=config['style_dim'], upsample=True)
+			AdainResBlk(dim_in=512, dim_out=256, style_dim=config['style_dim'], upsample=True),
+			AdainResBlk(dim_in=256, dim_out=128, style_dim=config['style_dim'], upsample=True)
 		)
 
 		self.to_rgb = nn.Sequential(
-			nn.InstanceNorm2d(num_features=256, affine=True),
+			nn.InstanceNorm2d(num_features=128, affine=True),
 			nn.LeakyReLU(negative_slope=0.2),
-			nn.Conv2d(in_channels=256, out_channels=3, kernel_size=1, stride=1, padding=0)
+			nn.Conv2d(in_channels=128, out_channels=3, kernel_size=1, stride=1, padding=0)
 
 			# TODO: tanh?
 		)
 
 		self.apply(he_init)
 
-	def forward(self, content_img, style_code):
-		x = self.from_rgb(content_img)
-
-		for block in self.encoder:
-			x = block(x)
-
-		content_code = x
+	def forward(self, content_code, style_code):
 		if self.training and self.config['content_std'] != 0:
-			noise = torch.zeros_like(x)
+			noise = torch.zeros_like(content_code)
 			noise.normal_(mean=0, std=self.config['content_std'])
 
-			x = x + noise
+			content_code = content_code + noise
 
 		if self.training and self.config['style_std'] != 0:
 			noise = torch.zeros_like(style_code)
@@ -67,13 +46,35 @@ class Generator(nn.Module):
 
 			style_code = style_code + noise
 
+		x = content_code
 		for block in self.decoder:
 			x = block(x, style_code)
 
-		return {
-			'img': self.to_rgb(x),
-			'content_code': content_code.reshape(x.shape[0], -1)
-		}
+		return self.to_rgb(x)
+
+
+class ContentEncoder(nn.Module):
+
+	def __init__(self, config):
+		super().__init__()
+
+		self.config = config
+
+		self.encoder = nn.Sequential(
+			nn.Conv2d(in_channels=3, out_channels=128, kernel_size=3, stride=1, padding=1),
+
+			ResBlk(dim_in=128, dim_out=256, normalize=True, downsample=True),
+			ResBlk(dim_in=256, dim_out=512, normalize=True, downsample=True),
+			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=True),
+
+			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=False),
+			ResBlk(dim_in=512, dim_out=config['content_depth'], normalize=True, downsample=False)
+		)
+
+		self.apply(he_init)
+
+	def forward(self, img):
+		return self.encoder(img)
 
 
 class Discriminator(nn.Module):
@@ -84,7 +85,7 @@ class Discriminator(nn.Module):
 		self.config = config
 		img_size = config['img_shape'][0]
 
-		dim_in = 256  #2**14 // img_size
+		dim_in = 2**14 // img_size
 		blocks = []
 		blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
 
@@ -112,28 +113,28 @@ class Discriminator(nn.Module):
 
 class MappingNetwork(nn.Module):
 
-	def __init__(self, config, latent_dim=16):
+	def __init__(self, config, latent_dim=16, hidden_dim=512):
 		super().__init__()
 
 		self.config = config
 
 		layers = []
-		layers += [nn.Linear(latent_dim, 512)]
+		layers += [nn.Linear(latent_dim, hidden_dim)]
 		layers += [nn.ReLU()]
 		for _ in range(3):
-			layers += [nn.Linear(512, 512)]
+			layers += [nn.Linear(hidden_dim, hidden_dim)]
 			layers += [nn.ReLU()]
 		self.shared = nn.Sequential(*layers)
 
 		self.unshared = nn.ModuleList()
 		for _ in range(config['n_classes']):
-			self.unshared += [nn.Sequential(nn.Linear(512, 512),
+			self.unshared += [nn.Sequential(nn.Linear(hidden_dim, hidden_dim),
 											nn.ReLU(),
-											nn.Linear(512, 512),
+											nn.Linear(hidden_dim, hidden_dim),
 											nn.ReLU(),
-											nn.Linear(512, 512),
+											nn.Linear(hidden_dim, hidden_dim),
 											nn.ReLU(),
-											nn.Linear(512, config['style_dim']))]
+											nn.Linear(hidden_dim, config['style_dim']))]
 
 		self.apply(he_init)
 
@@ -156,7 +157,7 @@ class StyleEncoder(nn.Module):
 		self.config = config
 		img_size = config['img_shape'][0]
 
-		dim_in = 256  #2**14 // img_size
+		dim_in = 2**14 // img_size
 		blocks = []
 		blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
 
