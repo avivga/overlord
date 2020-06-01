@@ -9,7 +9,6 @@ import cv2
 from tqdm import tqdm
 
 import face_alignment
-from dataset_pascal import Pascal
 
 
 class DataSet(ABC):
@@ -145,6 +144,46 @@ class Cub(DataSet):
 
 class Pascal3D(DataSet):
 
+	class Pascal(object):
+
+		def __init__(self, directory, class_ids, set_name):
+			self.name = 'pascal'
+			self.directory = directory
+			self.class_ids = class_ids
+			self.set_name = set_name
+			self.image_size = 224
+
+			self.images_original = {}
+			self.images_ref = {}
+			self.bounding_boxes = {}
+			self.rotation_matrices = {}
+			self.voxels = {}
+			self.num_data = {}
+
+			for class_id in class_ids:
+				data = np.load(os.path.join(directory, '%s_%s.npz' % (class_id, set_name)), allow_pickle=True, encoding='latin1')
+				self.images_original[class_id] = data['images']
+				self.images_ref[class_id] = data['images_ref']
+				self.bounding_boxes[class_id] = data['bounding_boxes']
+				self.rotation_matrices[class_id] = data['rotation_matrices']
+				self.voxels[class_id] = data['voxels']
+
+				if set_name == 'train':
+					# add ImageNet data
+					data = np.load(os.path.join(directory, '%s_%s.npz' % (class_id, 'imagenet')), allow_pickle=True,  encoding='latin1')
+					self.images_original[class_id] = np.concatenate(
+						(self.images_original[class_id], data['images']), axis=0)
+					self.images_ref[class_id] = np.concatenate(
+						(self.images_ref[class_id], data['images_ref']), axis=0)
+					self.bounding_boxes[class_id] = np.concatenate(
+						(self.bounding_boxes[class_id], data['bounding_boxes']), axis=0)
+					self.rotation_matrices[class_id] = np.concatenate(
+						(self.rotation_matrices[class_id], data['rotation_matrices']), axis=0)
+					self.voxels[class_id] = np.concatenate((self.voxels[class_id], data['voxels']), axis=0)
+
+				self.images_ref[class_id] = self.images_ref[class_id].transpose((0, 3, 1, 2))
+				self.num_data[class_id] = self.images_ref[class_id].shape[0]
+
 	def __init__(self, base_dir, extras):
 		super().__init__(base_dir)
 
@@ -158,10 +197,12 @@ class Pascal3D(DataSet):
 		self.__dict__.update(vars(args))
 
 	def read(self):
-		pascal = Pascal(directory=self._base_dir, class_ids=[self.category], set_name=self.split)
+		pascal = Pascal3D.Pascal(directory=self._base_dir, class_ids=[self.category], set_name=self.split)
 
 		imgs = pascal.images_ref[self.category].transpose(0, 2, 3, 1)[..., :3]
-		imgs = imgs[:, :, ::-1, :]
+		masks = pascal.images_ref[self.category].transpose(0, 2, 3, 1)[..., 3]
+
+		imgs[masks < 50] = 255
 		imgs = [cv2.resize(imgs[i], dsize=(self.img_size, self.img_size)) for i in range(imgs.shape[0])]
 
 		return {
