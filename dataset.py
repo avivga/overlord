@@ -63,6 +63,27 @@ class Cub(DataSet):
 		args = parser.parse_args(extras)
 		self.__dict__.update(vars(args))
 
+		self.categories = [
+			'Ani Redstart', 'Geococcyx', 'Pipit',
+			'Albatross', 'Auklet Guillemot', 'Ani Blackbird Grackle Starling',
+			'Bunting', 'Catbird Chat', 'Cormorant', 'Cowbird', 'Crow', 'Cuckoo',
+			'Finch', 'Flycatcher Pewee Sayornis', 'Frigatebird', 'Fulmar', 'Goldfinch',
+			'Grebe', 'Grosbeak Cardinal', 'Gull Kittiwake', 'Hummingbird', 'Jaeger', 'Jay',
+			'Kingbird Kingfisher', 'Mallard Gadwall Loon', 'Merganser', 'Oriole Meadowlark',
+			'Pelican', 'Puffin', 'Raven', 'Shrike', 'Sparrow Bobolink Junco Lark', 'Swallow',
+			'Tanager', 'Tern', 'Towhee', 'Thrasher Mockingbird', 'Vireo', 'Violetear',
+			'Warbler Widow Creeper Ovenbird Will', 'Waterthrush', 'Waxwing', 'Woodpecker Flicker Nuthatch',
+			'Wren', 'Yellowthroat', 'Nighthawk', 'Nutcracker',
+		]
+
+	def find_category(self, img_name):
+		for i, class_keys in enumerate(self.categories):
+			for k in class_keys.split():
+				if k in img_name.split('_'):
+					return i
+
+		raise Exception('no associated class')
+
 	def read(self):
 		data = scipy.io.loadmat(os.path.join(self._base_dir, 'from_cmr', 'data', '{}_cub_cleaned.mat'.format(self.split)), struct_as_record=False, squeeze_me=True)
 
@@ -73,11 +94,14 @@ class Cub(DataSet):
 
 		for i in range(n_images):
 			img_struct = data['images'][i]
+			img_name = os.path.basename(img_struct.rel_path)
 			img_path = os.path.join(self._base_dir, 'images', img_struct.rel_path)
 
 			img = imageio.imread(img_path)
 			if len(img.shape) == 2:
 				img = np.tile(img[..., np.newaxis], reps=(1, 1, 3))
+
+			img[img_struct.mask == 0] = 255
 
 			bbox = dict(
 				x1=img_struct.bbox.x1 - 1, x2=img_struct.bbox.x2 - 1,
@@ -110,12 +134,7 @@ class Cub(DataSet):
 			img_keypoints[visible, 1] = 2.0 * (img_keypoints[visible, 1] / self.img_size) - 1
 
 			keypoints.append(img_keypoints.reshape((-1, )))
-
-			category_id = img_struct.rel_path.split('/')[0]
-			categories.append(category_id)
-
-		unique_categories = list(set(categories))
-		categories = list(map(lambda c: unique_categories.index(c), categories))
+			categories.append(self.find_category(img_name))
 
 		return {
 			'img': np.stack(imgs, axis=0),
