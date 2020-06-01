@@ -58,15 +58,18 @@ class SLord:
 
 		return slord
 
-	def save(self, model_dir):
-		with open(os.path.join(model_dir, 'config.pkl'), 'wb') as config_fd:
+	def save(self, model_dir, epoch):
+		checkpoint_dir = os.path.join(model_dir, '{:04d}'.format(epoch))
+		os.mkdir(checkpoint_dir)
+
+		with open(os.path.join(checkpoint_dir, 'config.pkl'), 'wb') as config_fd:
 			pickle.dump(self.config, config_fd)
 
-		torch.save(self.content_encoder.state_dict(), os.path.join(model_dir, 'content_encoder.pth'))
-		torch.save(self.generator.state_dict(), os.path.join(model_dir, 'generator.pth'))
-		torch.save(self.discriminator.state_dict(), os.path.join(model_dir, 'discriminator.pth'))
-		torch.save(self.style_encoder.state_dict(), os.path.join(model_dir, 'style_encoder.pth'))
-		torch.save(self.mapping.state_dict(), os.path.join(model_dir, 'mapping.pth'))
+		torch.save(self.content_encoder.state_dict(), os.path.join(checkpoint_dir, 'content_encoder.pth'))
+		torch.save(self.generator.state_dict(), os.path.join(checkpoint_dir, 'generator.pth'))
+		torch.save(self.discriminator.state_dict(), os.path.join(checkpoint_dir, 'discriminator.pth'))
+		torch.save(self.style_encoder.state_dict(), os.path.join(checkpoint_dir, 'style_encoder.pth'))
+		torch.save(self.mapping.state_dict(), os.path.join(checkpoint_dir, 'mapping.pth'))
 
 	def train_latent(self, imgs, classes, contents, model_dir, tensorboard_dir):
 		data = dict(
@@ -222,7 +225,7 @@ class SLord:
 			# 	summary.add_scalar(tag='content_from_style/train', scalar_value=score_train, global_step=epoch)
 			# 	summary.add_scalar(tag='content_from_style/test', scalar_value=score_test, global_step=epoch)
 
-			self.save(model_dir)
+			self.save(model_dir, epoch)
 
 		summary.close()
 
