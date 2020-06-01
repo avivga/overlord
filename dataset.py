@@ -23,33 +23,6 @@ class DataSet(ABC):
 		pass
 
 
-class Cars3D(DataSet):
-
-	def __init__(self, base_dir, extras):
-		super().__init__(base_dir, extras)
-
-		self.__data_path = os.path.join(base_dir, 'cars3d.npz')
-
-	def read(self):
-		imgs = np.load(self.__data_path)['imgs']
-		classes = np.empty(shape=(imgs.shape[0], ), dtype=np.int64)
-		contents = np.empty(shape=(imgs.shape[0], ), dtype=np.int64)
-
-		for elevation in range(4):
-			for azimuth in range(24):
-				for object_id in range(183):
-					img_idx = elevation * 24 * 183 + azimuth * 183 + object_id
-
-					classes[img_idx] = object_id
-					contents[img_idx] = elevation * 24 + azimuth
-
-		return {
-			'img': imgs,
-			'class': classes,
-			'content': contents
-		}
-
-
 class Cub(DataSet):
 
 	def __init__(self, base_dir, extras):
@@ -303,100 +276,6 @@ class CelebA(DataSet):
 		}
 
 
-class Beards2Glasses(DataSet):
-
-	def __init__(self, base_dir, extras):
-		super().__init__(base_dir, extras)
-
-		parser = argparse.ArgumentParser()
-		# parser.add_argument('-a', '--attributes', type=int, nargs=2, required=True)
-		parser.add_argument('-cs', '--crop-size', type=int, nargs=2, default=(128, 128))
-		parser.add_argument('-ts', '--target-size', type=int, nargs=2, default=(128, 128))
-
-		args = parser.parse_args(extras)
-		self.__dict__.update(vars(args))
-
-		self.__imgs_dir = os.path.join(self._base_dir, 'Img', 'img_align_celeba_png.7z', 'img_align_celeba_png')
-		self.__identity_map_path = os.path.join(self._base_dir, 'Anno', 'identity_CelebA.txt')
-		self.__attribute_map_path = os.path.join(self._base_dir, 'Anno', 'list_attr_celeba.txt')
-
-	def __list_imgs(self):
-		with open(self.__identity_map_path, 'r') as fd:
-			lines = fd.read().splitlines()
-
-		img_paths = []
-		identities = []
-
-		for line in lines:
-			img_name, identity = line.split(' ')
-			img_path = os.path.join(self.__imgs_dir, os.path.splitext(img_name)[0] + '.png')
-
-			img_paths.append(img_path)
-			identities.append(identity)
-
-		return img_paths, identities
-
-	def __list_attributes(self):
-		with open(self.__attribute_map_path, 'r') as fd:
-			lines = fd.read().splitlines()[2:]
-
-		attributes = dict()
-		for line in lines:
-			tokens = line.split()
-			img_name = os.path.splitext(tokens[0])[0]
-			img_attributes = np.array(list(map(int, tokens[1:])))
-			img_attributes[img_attributes == -1] = 0
-			attributes[img_name] = img_attributes
-
-		return attributes
-
-	@staticmethod
-	def male_no_5_oclock(attributes):
-		return attributes[20] == 1 and attributes[0] == 0
-
-	@staticmethod
-	def beard(attributes):
-		return attributes[22] == 1 or attributes[16] == 1 or attributes[24] == 0
-
-	@staticmethod
-	def glasses(attributes):
-		return attributes[15] == 1
-
-	def read(self):
-		img_paths, identities = self.__list_imgs()
-		attritbute_map = self.__list_attributes()
-
-		classes = np.full(shape=(len(img_paths),), fill_value=-1, dtype=np.int32)
-		for i, img_path in enumerate(img_paths):
-			img_name = os.path.splitext(os.path.basename(img_path))[0]
-			img_attributes = attritbute_map[img_name]
-
-			if self.male_no_5_oclock(img_attributes) and self.beard(img_attributes) and (not self.glasses(img_attributes)):
-				classes[i] = 0
-
-			elif self.male_no_5_oclock(img_attributes) and (not self.beard(img_attributes)) and self.glasses(img_attributes):
-				classes[i] = 1
-
-		img_paths_of_attributes = np.array(img_paths)[classes != -1].tolist()
-		classes = classes[classes != -1]
-
-		imgs = np.empty(shape=(len(img_paths_of_attributes), self.target_size[0], self.target_size[1], 3), dtype=np.uint8)
-		for i in tqdm(range(len(img_paths_of_attributes))):
-			img = imageio.imread(img_paths_of_attributes[i])
-
-			img = img[
-				(img.shape[0] // 2 - self.crop_size[0] // 2):(img.shape[0] // 2 + self.crop_size[0] // 2),
-				(img.shape[1] // 2 - self.crop_size[1] // 2):(img.shape[1] // 2 + self.crop_size[1] // 2)
-			]
-
-			imgs[i] = cv2.resize(img, dsize=tuple(self.target_size))
-
-		return {
-			'img': imgs,
-			'class': classes
-		}
-
-
 class AFHQ(DataSet):
 
 	def __init__(self, base_dir, extras):
@@ -428,10 +307,8 @@ class AFHQ(DataSet):
 
 
 supported_datasets = {
-	'cars3d': Cars3D,
+	'afhq': AFHQ,
 	'cub': Cub,
 	'pascal3d': Pascal3D,
-	'celeba': CelebA,
-	'beard2glasses': Beards2Glasses,
-	'afhq': AFHQ
+	'celeba': CelebA
 }
