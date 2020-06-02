@@ -58,6 +58,27 @@ class SLord:
 
 		return slord
 
+	@staticmethod
+	def load_ema(model_dir, beta=0.999):
+		checkpoint_ids = sorted(os.listdir(model_dir))
+		slord_ema = SLord.load(os.path.join(model_dir, checkpoint_ids[0]))
+
+		for checkpoint_id in tqdm(checkpoint_ids[1:5]):
+			slord = SLord.load(os.path.join(model_dir, checkpoint_id))
+
+			pairs = [
+				(slord_ema.content_encoder, slord.content_encoder),
+				(slord_ema.generator, slord.generator),
+				(slord_ema.style_encoder, slord.style_encoder),
+				(slord_ema.mapping, slord.mapping)
+			]
+
+			for model_ema, model in pairs:
+				for param_ema, param in zip(model_ema.parameters(), model.parameters()):
+					param_ema.data = torch.lerp(param.data, param_ema.data, beta)
+
+		return slord_ema
+
 	def save(self, model_dir, epoch):
 		checkpoint_dir = os.path.join(model_dir, '{:04d}'.format(epoch))
 		os.mkdir(checkpoint_dir)
