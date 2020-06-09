@@ -1,6 +1,7 @@
 import os
 import argparse
 from abc import ABC, abstractmethod
+import glob
 
 import imageio
 import numpy as np
@@ -306,9 +307,47 @@ class AFHQ(DataSet):
 		}
 
 
+class Edges2Shoes(DataSet):
+
+	def __init__(self, base_dir, extras):
+		super().__init__(base_dir)
+
+		parser = argparse.ArgumentParser()
+		parser.add_argument('-sp', '--split', type=str, choices=['train', 'val'], required=True)
+		parser.add_argument('-is', '--img-size', type=int, default=128)
+
+		args = parser.parse_args(extras)
+		self.__dict__.update(vars(args))
+
+	def read(self):
+		img_paths = glob.glob(os.path.join(self._base_dir, self.split, '*.jpg'))
+
+		edge_imgs = np.empty(shape=(len(img_paths), self.img_size, self.img_size, 3), dtype=np.uint8)
+		shoe_imgs = np.empty(shape=(len(img_paths), self.img_size, self.img_size, 3), dtype=np.uint8)
+
+		for i in range(len(img_paths)):
+			img = imageio.imread(img_paths[i])
+			img = cv2.resize(img, dsize=(self.img_size * 2, self.img_size))
+
+			edge_imgs[i] = img[:, :self.img_size, :]
+			shoe_imgs[i] = img[:, self.img_size:, :]
+
+		imgs = np.concatenate((edge_imgs, shoe_imgs), axis=0)
+		classes = np.concatenate((
+			np.zeros(shape=(edge_imgs.shape[0], ), dtype=np.uint8),
+			np.ones(shape=(shoe_imgs.shape[0], ), dtype=np.uint8)
+		), axis=0)
+
+		return {
+			'img': imgs,
+			'class': classes
+		}
+
+
 supported_datasets = {
 	'afhq': AFHQ,
 	'cub': Cub,
 	'pascal3d': Pascal3D,
-	'celeba': CelebA
+	'celeba': CelebA,
+	'edges2shoes': Edges2Shoes
 }
