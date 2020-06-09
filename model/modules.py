@@ -27,8 +27,6 @@ class Generator(nn.Module):
 			nn.InstanceNorm2d(num_features=128, affine=True),
 			nn.LeakyReLU(negative_slope=0.2),
 			nn.Conv2d(in_channels=128, out_channels=3, kernel_size=1, stride=1, padding=0)
-
-			# TODO: tanh?
 		)
 
 		self.apply(he_init)
@@ -39,12 +37,6 @@ class Generator(nn.Module):
 			noise.normal_(mean=0, std=self.config['content_std'])
 
 			content_code = content_code + noise
-
-		if self.training and self.config['style_std'] != 0:
-			noise = torch.zeros_like(style_code)
-			noise.normal_(mean=0, std=self.config['style_std'])
-
-			style_code = style_code + noise
 
 		x = content_code
 		for block in self.decoder:

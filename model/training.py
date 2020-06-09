@@ -5,10 +5,6 @@ from tqdm import tqdm
 
 import numpy as np
 
-from sklearn.linear_model import LogisticRegression, LinearRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-
 import torch
 from torch.nn import functional as F
 from torch.optim import Adam
@@ -19,7 +15,7 @@ from model.modules import ContentEncoder, Generator, Discriminator, StyleEncoder
 from model.utils import NamedTensorDataset
 
 
-class SLord:
+class Model:
 
 	def __init__(self, config):
 		super().__init__()
@@ -49,7 +45,7 @@ class SLord:
 		with open(os.path.join(model_dir, 'config.pkl'), 'rb') as config_fd:
 			config = pickle.load(config_fd)
 
-		slord = SLord(config)
+		slord = Model(config)
 		slord.content_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'content_encoder.pth')))
 		slord.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
 		slord.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
@@ -57,27 +53,6 @@ class SLord:
 		slord.mapping.load_state_dict(torch.load(os.path.join(model_dir, 'mapping.pth')))
 
 		return slord
-
-	@staticmethod
-	def load_ema(model_dir, beta=0.999):
-		checkpoint_ids = sorted(os.listdir(model_dir))
-		slord_ema = SLord.load(os.path.join(model_dir, checkpoint_ids[0]))
-
-		for checkpoint_id in tqdm(checkpoint_ids[1:5]):
-			slord = SLord.load(os.path.join(model_dir, checkpoint_id))
-
-			pairs = [
-				(slord_ema.content_encoder, slord.content_encoder),
-				(slord_ema.generator, slord.generator),
-				(slord_ema.style_encoder, slord.style_encoder),
-				(slord_ema.mapping, slord.mapping)
-			]
-
-			for model_ema, model in pairs:
-				for param_ema, param in zip(model_ema.parameters(), model.parameters()):
-					param_ema.data = torch.lerp(param.data, param_ema.data, beta)
-
-		return slord_ema
 
 	def save(self, model_dir, epoch):
 		checkpoint_dir = os.path.join(model_dir, '{:04d}'.format(epoch))
@@ -92,7 +67,7 @@ class SLord:
 		torch.save(self.style_encoder.state_dict(), os.path.join(checkpoint_dir, 'style_encoder.pth'))
 		torch.save(self.mapping.state_dict(), os.path.join(checkpoint_dir, 'mapping.pth'))
 
-	def train_latent(self, imgs, classes, contents, model_dir, tensorboard_dir):
+	def train(self, imgs, classes, model_dir, tensorboard_dir):
 		data = dict(
 			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
 			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
@@ -209,43 +184,6 @@ class SLord:
 			summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=epoch)
 			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
 
-			# styles_random = self.generate_samples(dataset, randomized=True, style_only=True)
-			# summary.add_image(tag='styles-random', img_tensor=styles_random, global_step=epoch)
-
-			if epoch % 5 == 0:
-				content_codes = self.extract_codes(dataset)
-				score_train, score_test = self.classification_score(X=content_codes, y=classes)
-				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
-				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
-
-			# 	content_codes, style_codes = self.extract_codes(dataset)
-			#
-			# 	if contents is not None:
-			# 		if contents.dtype == np.int64:
-			# 			score_train, score_test = self.classification_score(X=content_codes, y=contents)
-			# 		else:
-			# 			score_train, score_test = self.regression_score(X=content_codes, y=contents)
-			#
-			# 		summary.add_scalar(tag='content_from_content/train', scalar_value=score_train, global_step=epoch)
-			# 		summary.add_scalar(tag='content_from_content/test', scalar_value=score_test, global_step=epoch)
-			#
-			# 	score_train, score_test = self.classification_score(X=content_codes, y=classes)
-			# 	summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
-			# 	summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
-			#
-			# 	score_train, score_test = self.classification_score(X=style_codes, y=classes)
-			# 	summary.add_scalar(tag='class_from_style/train', scalar_value=score_train, global_step=epoch)
-			# 	summary.add_scalar(tag='class_from_style/test', scalar_value=score_test, global_step=epoch)
-			#
-			# 	if contents is not None:
-			# 		if contents.dtype == np.int64:
-			# 			score_train, score_test = self.classification_score(X=style_codes, y=contents)
-			# 		else:
-			# 			score_train, score_test = self.regression_score(X=style_codes, y=contents)
-			#
-			# 	summary.add_scalar(tag='content_from_style/train', scalar_value=score_train, global_step=epoch)
-			# 	summary.add_scalar(tag='content_from_style/test', scalar_value=score_test, global_step=epoch)
-
 			self.save(model_dir, epoch)
 
 		summary.close()
@@ -297,16 +235,15 @@ class SLord:
 		loss_diversity = torch.mean(torch.abs(generated_img - generated_img2))
 
 		style_code_original = self.style_encoder(batch['img'], batch['class_id'])
-		reconstructed_img = self.generator(content_code, style_code_original)
+		content_code_fake = self.content_encoder(generated_img)
+		reconstructed_img = self.generator(content_code_fake, style_code_original)
 		loss_reconstruction = torch.mean(torch.abs(reconstructed_img - batch['img']))
 
 		loss_content_decay = torch.sum(content_code ** 2).mean()
-		loss_style_decay = torch.sum(style_code_target ** 2).mean()
 
 		return {
 			'reconstruction': loss_reconstruction,
 			'content_decay': loss_content_decay,
-			'style_decay': loss_style_decay,
 			'adversarial': loss_adversarial,
 			'style_reconstruction': loss_style_reconstruction,
 			'diversity': -loss_diversity
@@ -358,49 +295,3 @@ class SLord:
 		summary = torch.cat(summary, dim=1)
 		summary = ((summary + 1) / 2).clamp(0, 1)
 		return summary
-
-	@staticmethod
-	def regression_score(X, y):
-		scaler = StandardScaler()
-		X = scaler.fit_transform(X)
-
-		X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-
-		regressor = LinearRegression()
-		regressor.fit(X_train, y_train)
-
-		err_train = regressor.score(X_train, y_train)
-		err_test = regressor.score(X_test, y_test)
-
-		return err_train, err_test
-
-	@staticmethod
-	def classification_score(X, y):
-		scaler = StandardScaler()
-		X = scaler.fit_transform(X)
-
-		X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-
-		classifier = LogisticRegression(random_state=0)
-		classifier.fit(X_train, y_train)
-
-		acc_train = classifier.score(X_train, y_train)
-		acc_test = classifier.score(X_test, y_test)
-
-		return acc_train, acc_test
-
-	@torch.no_grad()
-	def extract_codes(self, dataset):
-		self.content_encoder.eval()
-
-		data_loader = DataLoader(dataset, batch_size=128, shuffle=False, pin_memory=True, drop_last=False)
-
-		content_codes = []
-		for batch in data_loader:
-			batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
-
-			batch_content_codes = self.content_encoder(batch['img']).view((batch['img'].shape[0], -1))
-			content_codes.append(batch_content_codes.cpu().numpy())
-
-		content_codes = np.concatenate(content_codes, axis=0)
-		return content_codes
