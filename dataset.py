@@ -8,6 +8,8 @@ import numpy as np
 import scipy.io
 import cv2
 
+from tqdm import tqdm
+
 
 class DataSet(ABC):
 
@@ -48,6 +50,52 @@ class AFHQ(DataSet):
 		return {
 			'img': np.concatenate(imgs, axis=0),
 			'class': np.concatenate(classes, axis=0)
+		}
+
+
+class AnimalFaces(DataSet):
+
+	def __init__(self, base_dir, extras):
+		super().__init__(base_dir)
+
+		parser = argparse.ArgumentParser()
+		parser.add_argument('-sl', '--split-list', type=str, required=True)
+		parser.add_argument('-is', '--img-size', type=int, default=128)
+		parser.add_argument('-ss', '--shortest-size', type=int, default=140)
+
+		args = parser.parse_args(extras)
+		self.__dict__.update(vars(args))
+
+	def read(self):
+		imgs = []
+		classes = []
+
+		with open(self.split_list, 'r') as fp:
+			paths = fp.read().splitlines()
+
+		for path in tqdm(paths):
+			img = imageio.imread(os.path.join(self._base_dir, path))
+
+			shortest = min(img.shape[0], img.shape[1])
+			factor = self.shortest_size / shortest
+
+			img = cv2.resize(img, dsize=(int(img.shape[1] * factor), int(img.shape[0] * factor)))
+
+			top = np.random.choice(np.arange(img.shape[0] - self.img_size + 1))
+			left = np.random.choice(np.arange(img.shape[1] - self.img_size + 1))
+
+			img_cropped = img[top:top+self.img_size, left:left+self.img_size]
+			imgs.append(img_cropped)
+
+			class_id, img_name = path.split('/')
+			classes.append(class_id)
+
+		unique_class_ids = list(set(classes))
+		classes = [unique_class_ids.index(c) for c in classes]
+
+		return {
+			'img': np.concatenate(imgs, axis=0),
+			'class': np.array(classes)
 		}
 
 
@@ -167,6 +215,7 @@ class Edges2Shoes(DataSet):
 
 supported_datasets = {
 	'afhq': AFHQ,
+	'animalfaces': AnimalFaces,
 	'cub': Cub,
 	'edges2shoes': Edges2Shoes
 }
