@@ -22,6 +22,8 @@ base_config = dict(
 			gradient_penalty=1,
 			style_reconstruction=1,
 			diversity=2
-		)
+		),
+
+		n_diversity_iterations=100000
 	)
 )

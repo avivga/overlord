@@ -45,14 +45,14 @@ class Model:
 		with open(os.path.join(model_dir, 'config.pkl'), 'rb') as config_fd:
 			config = pickle.load(config_fd)
 
-		slord = Model(config)
-		slord.content_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'content_encoder.pth')))
-		slord.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
-		slord.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
-		slord.style_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'style_encoder.pth')))
-		slord.mapping.load_state_dict(torch.load(os.path.join(model_dir, 'mapping.pth')))
+		model = Model(config)
+		model.content_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'content_encoder.pth')))
+		model.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
+		model.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
+		model.style_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'style_encoder.pth')))
+		model.mapping.load_state_dict(torch.load(os.path.join(model_dir, 'mapping.pth')))
 
-		return slord
+		return model
 
 	def save(self, model_dir, epoch):
 		checkpoint_dir = os.path.join(model_dir, '{:04d}'.format(epoch))
@@ -66,6 +66,17 @@ class Model:
 		torch.save(self.discriminator.state_dict(), os.path.join(checkpoint_dir, 'discriminator.pth'))
 		torch.save(self.style_encoder.state_dict(), os.path.join(checkpoint_dir, 'style_encoder.pth'))
 		torch.save(self.mapping.state_dict(), os.path.join(checkpoint_dir, 'mapping.pth'))
+
+	def clone(self):
+		model = Model(self.config)
+
+		model.content_encoder.load_state_dict(self.content_encoder.state_dict())
+		model.generator.load_state_dict(self.generator.state_dict())
+		model.discriminator.load_state_dict(self.discriminator.state_dict())
+		model.style_encoder.load_state_dict(self.style_encoder.state_dict())
+		model.mapping.load_state_dict(self.mapping.state_dict())
+
+		return model
 
 	def train(self, imgs, classes, model_dir, tensorboard_dir):
 		data = dict(
@@ -109,6 +120,9 @@ class Model:
 			betas=(0.0, 0.99), weight_decay=1e-4
 		)
 
+		w_initial_diversity = self.config['train']['loss_weights']['diversity']
+
+		model_ema = self.clone()
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['train']['n_epochs']):
 			self.content_encoder.train()
@@ -167,6 +181,11 @@ class Model:
 				loss_generator.backward()
 				generator_optimizer.step()
 
+				self.update_ema(model_ema)
+
+				if self.config['train']['loss_weights']['diversity'] > 0:
+					self.config['train']['loss_weights']['diversity'] -= (w_initial_diversity / self.config['train']['n_diversity_iterations'])
+
 				pbar.set_description_str('epoch #{}'.format(epoch))
 				pbar.set_postfix(gen_loss=loss_generator.item(), disc_loss=loss_discriminator.item())
 
@@ -178,13 +197,13 @@ class Model:
 			for term, loss in losses_generator.items():
 				summary.add_scalar(tag='loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
 
-			samples_fixed = self.generate_samples(dataset, randomized=False)
-			samples_random = self.generate_samples(dataset, randomized=True)
+			samples_fixed = model_ema.generate_samples(dataset, randomized=False)
+			samples_random = model_ema.generate_samples(dataset, randomized=True)
 
 			summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=epoch)
 			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
 
-			self.save(model_dir, epoch)
+			model_ema.save(model_dir, epoch)
 
 		summary.close()
 
@@ -295,3 +314,15 @@ class Model:
 		summary = torch.cat(summary, dim=1)
 		summary = ((summary + 1) / 2).clamp(0, 1)
 		return summary
+
+	def update_ema(self, model_ema, beta=0.999):
+		pairs = [
+			(model_ema.content_encoder, self.content_encoder),
+			(model_ema.generator, self.generator),
+			(model_ema.style_encoder, self.style_encoder),
+			(model_ema.mapping, self.mapping)
+		]
+
+		for model_ema, model in pairs:
+			for param_ema, param in zip(model_ema.parameters(), model.parameters()):
+				param_ema.data = torch.lerp(param.data, param_ema.data, beta)

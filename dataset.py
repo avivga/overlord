@@ -94,7 +94,7 @@ class AnimalFaces(DataSet):
 		classes = [unique_class_ids.index(c) for c in classes]
 
 		return {
-			'img': np.concatenate(imgs, axis=0),
+			'img': np.stack(imgs, axis=0),
 			'class': np.array(classes)
 		}
 
