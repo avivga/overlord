@@ -181,7 +181,7 @@ class Model:
 				loss_generator.backward()
 				generator_optimizer.step()
 
-				self.update_ema(model_ema)
+				model_ema.update_from(self)
 
 				if self.config['train']['loss_weights']['diversity'] > 0:
 					self.config['train']['loss_weights']['diversity'] -= (w_initial_diversity / self.config['train']['n_diversity_iterations'])
@@ -315,12 +315,12 @@ class Model:
 		summary = ((summary + 1) / 2).clamp(0, 1)
 		return summary
 
-	def update_ema(self, model_ema, beta=0.999):
+	def update_from(self, other, beta=0.999):
 		pairs = [
-			(model_ema.content_encoder, self.content_encoder),
-			(model_ema.generator, self.generator),
-			(model_ema.style_encoder, self.style_encoder),
-			(model_ema.mapping, self.mapping)
+			(self.content_encoder, other.content_encoder),
+			(self.generator, other.generator),
+			(self.style_encoder, other.style_encoder),
+			(self.mapping, other.mapping)
 		]
 
 		for model_ema, model in pairs:
