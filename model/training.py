@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from model.modules import ContentEncoder, Generator, Discriminator, StyleEncoder, MappingNetwork
-from model.utils import NamedTensorDataset
+from model.utils import NamedTensorDataset, he_init
 
 
 class Model:
@@ -37,6 +37,30 @@ class Model:
 
 		self.mapping = MappingNetwork(self.config)
 		self.mapping.to(self.device)
+
+		self.generator_optimizer = Adam(
+			params=itertools.chain(self.content_encoder.parameters(), self.generator.parameters()),
+			lr=self.config['train']['learning_rate']['generator'],
+			betas=(0.0, 0.99), weight_decay=1e-4
+		)
+
+		self.discriminator_optimizer = Adam(
+			params=self.discriminator.parameters(),
+			lr=self.config['train']['learning_rate']['discriminator'],
+			betas=(0.0, 0.99), weight_decay=1e-4
+		)
+
+		self.style_encoder_optimizer = Adam(
+			params=self.style_encoder.parameters(),
+			lr=self.config['train']['learning_rate']['style_encoder'],
+			betas=(0.0, 0.99), weight_decay=1e-4
+		)
+
+		self.mapping_optimizer = Adam(
+			params=self.mapping.parameters(),
+			lr=self.config['train']['learning_rate']['mapping'],
+			betas=(0.0, 0.99), weight_decay=1e-4
+		)
 
 		self.rs = np.random.RandomState(seed=1337)
 
@@ -96,33 +120,17 @@ class Model:
 			shuffle=True, pin_memory=True, drop_last=False
 		)
 
-		generator_optimizer = Adam(
-			params=itertools.chain(self.content_encoder.parameters(), self.generator.parameters()),
-			lr=self.config['train']['learning_rate']['generator'],
-			betas=(0.0, 0.99), weight_decay=1e-4
-		)
-
-		discriminator_optimizer = Adam(
-			params=self.discriminator.parameters(),
-			lr=self.config['train']['learning_rate']['discriminator'],
-			betas=(0.0, 0.99), weight_decay=1e-4
-		)
-
-		style_encoder_optimizer = Adam(
-			params=self.style_encoder.parameters(),
-			lr=self.config['train']['learning_rate']['style_encoder'],
-			betas=(0.0, 0.99), weight_decay=1e-4
-		)
-
-		mapping_optimizer = Adam(
-			params=self.mapping.parameters(),
-			lr=self.config['train']['learning_rate']['mapping'],
-			betas=(0.0, 0.99), weight_decay=1e-4
-		)
-
 		w_initial_diversity = self.config['train']['loss_weights']['diversity']
+		w_diversity = w_initial_diversity
 
 		model_ema = self.clone()
+
+		self.content_encoder.apply(he_init)
+		self.generator.apply(he_init)
+		self.discriminator.apply(he_init)
+		self.style_encoder.apply(he_init)
+		self.mapping.apply(he_init)
+
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['train']['n_epochs']):
 			self.content_encoder.train()
@@ -150,41 +158,39 @@ class Model:
 				batch['target_class_z2'] = torch.randn(batch['img_id'].shape[0], 16).to(self.device)
 
 				loss_discriminator = self.do_discriminator(batch, sampling=True)
-				discriminator_optimizer.zero_grad()
+				self.reset_grads()
 				loss_discriminator.backward()
-				discriminator_optimizer.step()
+				self.discriminator_optimizer.step()
 
 				loss_discriminator = self.do_discriminator(batch, sampling=False)
-				discriminator_optimizer.zero_grad()
+				self.reset_grads()
 				loss_discriminator.backward()
-				discriminator_optimizer.step()
+				self.discriminator_optimizer.step()
 
 				losses_generator = self.do_generator(batch, sampling=True)
 				loss_generator = 0
 				for term, loss in losses_generator.items():
-					loss_generator += self.config['train']['loss_weights'][term] * loss
+					w_term = w_diversity if term == 'diversity' else self.config['train']['loss_weights'][term]
+					loss_generator += w_term * loss
 
-				generator_optimizer.zero_grad()
-				mapping_optimizer.zero_grad()
-				style_encoder_optimizer.zero_grad()
+				self.reset_grads()
 				loss_generator.backward()
-				generator_optimizer.step()
-				mapping_optimizer.step()
-				style_encoder_optimizer.step()
+				self.generator_optimizer.step()
+				self.mapping_optimizer.step()
+				self.style_encoder_optimizer.step()
 
 				losses_generator = self.do_generator(batch, sampling=False)
 				loss_generator = 0
 				for term, loss in losses_generator.items():
-					loss_generator += self.config['train']['loss_weights'][term] * loss
+					w_term = w_diversity if term == 'diversity' else self.config['train']['loss_weights'][term]
+					loss_generator += w_term * loss
 
-				generator_optimizer.zero_grad()
+				self.reset_grads()
 				loss_generator.backward()
-				generator_optimizer.step()
+				self.generator_optimizer.step()
 
 				model_ema.update_from(self)
-
-				if self.config['train']['loss_weights']['diversity'] > 0:
-					self.config['train']['loss_weights']['diversity'] -= (w_initial_diversity / self.config['train']['n_diversity_iterations'])
+				w_diversity = max(w_diversity - (w_initial_diversity / self.config['train']['n_diversity_iterations']), 0)
 
 				pbar.set_description_str('epoch #{}'.format(epoch))
 				pbar.set_postfix(gen_loss=loss_generator.item(), disc_loss=loss_discriminator.item())
@@ -193,6 +199,7 @@ class Model:
 
 			summary.add_scalar(tag='loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
 			summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
+			summary.add_scalar(tag='w/diversity', scalar_value=w_diversity, global_step=epoch)
 
 			for term, loss in losses_generator.items():
 				summary.add_scalar(tag='loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
@@ -208,12 +215,12 @@ class Model:
 		summary.close()
 
 	def do_discriminator(self, batch, sampling=False):
-		if sampling:
-			style_code_target = self.mapping(batch['target_class_z'], batch['target_class_id'])
-		else:
-			style_code_target = self.style_encoder(batch['target_class_img'], batch['target_class_id'])
-
 		with torch.no_grad():
+			if sampling:
+				style_code_target = self.mapping(batch['target_class_z'], batch['target_class_id'])
+			else:
+				style_code_target = self.style_encoder(batch['target_class_img'], batch['target_class_id'])
+
 			content_code = self.content_encoder(batch['img'])
 			generated_img = self.generator(content_code, style_code_target)
 
@@ -258,7 +265,7 @@ class Model:
 		reconstructed_img = self.generator(content_code_fake, style_code_original)
 		loss_reconstruction = torch.mean(torch.abs(reconstructed_img - batch['img']))
 
-		loss_content_decay = torch.sum(content_code ** 2).mean()
+		loss_content_decay = torch.sum(content_code ** 2, dim=[1, 2, 3]).mean()
 
 		return {
 			'reconstruction': loss_reconstruction,
@@ -284,6 +291,12 @@ class Model:
 		assert(grad_dout2.size() == x_in.size())
 		reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
 		return reg
+
+	def reset_grads(self):
+		self.generator_optimizer.zero_grad()
+		self.discriminator_optimizer.zero_grad()
+		self.style_encoder_optimizer.zero_grad()
+		self.mapping_optimizer.zero_grad()
 
 	@torch.no_grad()
 	def generate_samples(self, dataset, n_samples=10, randomized=False):

@@ -4,8 +4,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from model.utils import he_init
-
 
 class Generator(nn.Module):
 
@@ -28,8 +26,6 @@ class Generator(nn.Module):
 			nn.LeakyReLU(negative_slope=0.2),
 			nn.Conv2d(in_channels=128, out_channels=3, kernel_size=1, stride=1, padding=0)
 		)
-
-		self.apply(he_init)
 
 	def forward(self, content_code, style_code):
 		if self.training and self.config['content_std'] != 0:
@@ -63,8 +59,6 @@ class ContentEncoder(nn.Module):
 			ResBlk(dim_in=512, dim_out=config['content_depth'], normalize=True, downsample=False)
 		)
 
-		self.apply(he_init)
-
 	def forward(self, img):
 		return self.encoder(img)
 
@@ -92,8 +86,6 @@ class Discriminator(nn.Module):
 		blocks += [nn.LeakyReLU(0.2)]
 		blocks += [nn.Conv2d(dim_out, config['n_classes'], 1, 1, 0)]
 		self.main = nn.Sequential(*blocks)
-
-		self.apply(he_init)
 
 	def forward(self, x, y):
 		out = self.main(x)
@@ -127,8 +119,6 @@ class MappingNetwork(nn.Module):
 											nn.Linear(hidden_dim, hidden_dim),
 											nn.ReLU(),
 											nn.Linear(hidden_dim, config['style_dim']))]
-
-		self.apply(he_init)
 
 	def forward(self, z, y):
 		h = self.shared(z)
@@ -167,8 +157,6 @@ class StyleEncoder(nn.Module):
 		self.unshared = nn.ModuleList()
 		for _ in range(config['n_classes']):
 			self.unshared += [nn.Linear(dim_out, config['style_dim'])]
-
-		self.apply(he_init)
 
 	def forward(self, x, y):
 		h = self.shared(x)
