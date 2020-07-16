@@ -11,34 +11,56 @@ class Generator(nn.Module):
 		super().__init__()
 
 		self.config = config
+		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_dim'])
 
-		self.decoder = nn.Sequential(
-			AdainResBlk(dim_in=config['content_depth'], dim_out=512, style_dim=config['style_dim'], upsample=False),
-			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['style_dim'], upsample=False),
-
-			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['style_dim'], upsample=True),
-			AdainResBlk(dim_in=512, dim_out=256, style_dim=config['style_dim'], upsample=True),
-			AdainResBlk(dim_in=256, dim_out=128, style_dim=config['style_dim'], upsample=True)
+		self.adains = nn.Sequential(
+			AdainResBlk(dim_in=config['content_depth'] + config['class_dim'], dim_out=512, style_dim=config['class_dim'], upsample=False),
+			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['class_dim'], upsample=False)
 		)
 
-		self.to_rgb = nn.Sequential(
-			nn.InstanceNorm2d(num_features=128, affine=True),
-			nn.LeakyReLU(negative_slope=0.2),
-			nn.Conv2d(in_channels=128, out_channels=3, kernel_size=1, stride=1, padding=0)
+		self.convs = nn.Sequential(
+			nn.Upsample(scale_factor=2),
+			nn.ReflectionPad2d(padding=2),
+			nn.Conv2d(in_channels=512, out_channels=256, kernel_size=5, stride=1),
+			nn.InstanceNorm2d(num_features=256),
+			nn.ReLU(),
+
+			nn.Upsample(scale_factor=2),
+			nn.ReflectionPad2d(padding=2),
+			nn.Conv2d(in_channels=256, out_channels=128, kernel_size=5, stride=1),
+			nn.InstanceNorm2d(num_features=128),
+			nn.ReLU(),
+
+			nn.Upsample(scale_factor=2),
+			nn.ReflectionPad2d(padding=2),
+			nn.Conv2d(in_channels=128, out_channels=64, kernel_size=5, stride=1),
+			nn.InstanceNorm2d(num_features=64),
+			nn.ReLU(),
+
+			nn.ReflectionPad2d(padding=3),
+			nn.Conv2d(in_channels=64, out_channels=3, kernel_size=7, stride=1),
+			nn.Tanh()
 		)
 
-	def forward(self, content_code, style_code):
+		nn.init.uniform_(self.class_embedding.weight, a=-0.05, b=0.05)
+
+	def forward(self, content_code, class_id):
+		batch_size = content_code.shape[0]
+
 		if self.training and self.config['content_std'] != 0:
 			noise = torch.zeros_like(content_code)
 			noise.normal_(mean=0, std=self.config['content_std'])
 
 			content_code = content_code + noise
 
-		x = content_code
-		for block in self.decoder:
-			x = block(x, style_code)
+		class_code = self.class_embedding(class_id)
+		class_code_repeated = class_code.view((batch_size, -1, 1, 1)).repeat((1, 1, 16, 16))
+		x = torch.cat((content_code, class_code_repeated), dim=1)
 
-		return self.to_rgb(x)
+		for block in self.adains:
+			x = block(x, class_code)
+
+		return self.convs(x)
 
 
 class ContentEncoder(nn.Module):
@@ -49,11 +71,25 @@ class ContentEncoder(nn.Module):
 		self.config = config
 
 		self.encoder = nn.Sequential(
-			nn.Conv2d(in_channels=3, out_channels=128, kernel_size=3, stride=1, padding=1),
+			nn.ReflectionPad2d(padding=3),
+			nn.Conv2d(in_channels=3, out_channels=64, kernel_size=7, stride=1),
+			nn.InstanceNorm2d(num_features=64),
+			nn.ReLU(),
 
-			ResBlk(dim_in=128, dim_out=256, normalize=True, downsample=True),
-			ResBlk(dim_in=256, dim_out=512, normalize=True, downsample=True),
-			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=True),
+			nn.ReflectionPad2d(padding=1),
+			nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2),
+			nn.InstanceNorm2d(num_features=128),
+			nn.ReLU(),
+
+			nn.ReflectionPad2d(padding=1),
+			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=4, stride=2),
+			nn.InstanceNorm2d(num_features=256),
+			nn.ReLU(),
+
+			nn.ReflectionPad2d(padding=1),
+			nn.Conv2d(in_channels=256, out_channels=512, kernel_size=4, stride=2),
+			nn.InstanceNorm2d(num_features=512),
+			nn.ReLU(),
 
 			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=False),
 			ResBlk(dim_in=512, dim_out=config['content_depth'], normalize=True, downsample=False)
@@ -93,81 +129,6 @@ class Discriminator(nn.Module):
 		idx = torch.LongTensor(range(y.size(0))).to(y.device)
 		out = out[idx, y]  # (batch)
 		return out
-
-
-class MappingNetwork(nn.Module):
-
-	def __init__(self, config, latent_dim=16, hidden_dim=512):
-		super().__init__()
-
-		self.config = config
-
-		layers = []
-		layers += [nn.Linear(latent_dim, hidden_dim)]
-		layers += [nn.ReLU()]
-		for _ in range(3):
-			layers += [nn.Linear(hidden_dim, hidden_dim)]
-			layers += [nn.ReLU()]
-		self.shared = nn.Sequential(*layers)
-
-		self.unshared = nn.ModuleList()
-		for _ in range(config['n_classes']):
-			self.unshared += [nn.Sequential(nn.Linear(hidden_dim, hidden_dim),
-											nn.ReLU(),
-											nn.Linear(hidden_dim, hidden_dim),
-											nn.ReLU(),
-											nn.Linear(hidden_dim, hidden_dim),
-											nn.ReLU(),
-											nn.Linear(hidden_dim, config['style_dim']))]
-
-	def forward(self, z, y):
-		h = self.shared(z)
-		out = []
-		for layer in self.unshared:
-			out += [layer(h)]
-		out = torch.stack(out, dim=1)  # (batch, num_domains, style_dim)
-		idx = torch.LongTensor(range(y.size(0))).to(y.device)
-		s = out[idx, y]  # (batch, style_dim)
-		return s
-
-
-class StyleEncoder(nn.Module):
-
-	def __init__(self, config, max_conv_dim=512):
-		super().__init__()
-
-		self.config = config
-		img_size = config['img_shape'][0]
-
-		dim_in = 2**14 // img_size
-		blocks = []
-		blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
-
-		repeat_num = int(np.log2(img_size)) - 2
-		for _ in range(repeat_num):
-			dim_out = min(dim_in*2, max_conv_dim)
-			blocks += [ResBlk(dim_in, dim_out, downsample=True)]
-			dim_in = dim_out
-
-		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
-		blocks += [nn.LeakyReLU(0.2)]
-		self.shared = nn.Sequential(*blocks)
-
-		self.unshared = nn.ModuleList()
-		for _ in range(config['n_classes']):
-			self.unshared += [nn.Linear(dim_out, config['style_dim'])]
-
-	def forward(self, x, y):
-		h = self.shared(x)
-		h = h.view(h.size(0), -1)
-		out = []
-		for layer in self.unshared:
-			out += [layer(h)]
-		out = torch.stack(out, dim=1)  # (batch, num_domains, style_dim)
-		idx = torch.LongTensor(range(y.size(0))).to(y.device)
-		s = out[idx, y]  # (batch, style_dim)
-		return s
 
 
 class ResBlk(nn.Module):
