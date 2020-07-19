@@ -11,11 +11,13 @@ class Generator(nn.Module):
 		super().__init__()
 
 		self.config = config
-		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_dim'])
+
+		self.content_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['content_depth'] * 16 * 16)
+		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_dim'] * 16 * 16)
 
 		self.adains = nn.Sequential(
-			AdainResBlk(dim_in=config['content_depth'] + config['class_dim'], dim_out=512, style_dim=config['class_dim'], upsample=False),
-			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['class_dim'], upsample=False)
+			AdainResBlk(dim_in=config['content_depth'] + config['class_dim'], dim_out=512, style_dim=config['class_dim'] * 16 * 16),
+			AdainResBlk(dim_in=512, dim_out=512, style_dim=config['class_dim'] * 16 * 16)
 		)
 
 		self.convs = nn.Sequential(
@@ -42,61 +44,35 @@ class Generator(nn.Module):
 			nn.Tanh()
 		)
 
+		nn.init.uniform_(self.content_embedding.weight, a=-0.05, b=0.05)
 		nn.init.uniform_(self.class_embedding.weight, a=-0.05, b=0.05)
 
-	def forward(self, content_code, class_id):
-		batch_size = content_code.shape[0]
+	def forward(self, content_img_id, class_id):
+		batch_size = content_img_id.shape[0]
+
+		content_code = self.content_embedding(content_img_id)
+		content_code = content_code.view((batch_size, -1, 16, 16))
 
 		if self.training and self.config['content_std'] != 0:
 			noise = torch.zeros_like(content_code)
 			noise.normal_(mean=0, std=self.config['content_std'])
 
-			content_code = content_code + noise
+			content_code_regularized = content_code + noise
+		else:
+			content_code_regularized = content_code
 
 		class_code = self.class_embedding(class_id)
-		class_code_repeated = class_code.view((batch_size, -1, 1, 1)).repeat((1, 1, 16, 16))
-		x = torch.cat((content_code, class_code_repeated), dim=1)
+		class_code = class_code.view((batch_size, -1, 16, 16))
+
+		x = torch.cat((content_code_regularized, class_code), dim=1)
 
 		for block in self.adains:
-			x = block(x, class_code)
+			x = block(x, class_code.view((batch_size, -1)))
 
-		return self.convs(x)
-
-
-class ContentEncoder(nn.Module):
-
-	def __init__(self, config):
-		super().__init__()
-
-		self.config = config
-
-		self.encoder = nn.Sequential(
-			nn.ReflectionPad2d(padding=3),
-			nn.Conv2d(in_channels=3, out_channels=64, kernel_size=7, stride=1),
-			nn.InstanceNorm2d(num_features=64),
-			nn.ReLU(),
-
-			nn.ReflectionPad2d(padding=1),
-			nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2),
-			nn.InstanceNorm2d(num_features=128),
-			nn.ReLU(),
-
-			nn.ReflectionPad2d(padding=1),
-			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=4, stride=2),
-			nn.InstanceNorm2d(num_features=256),
-			nn.ReLU(),
-
-			nn.ReflectionPad2d(padding=1),
-			nn.Conv2d(in_channels=256, out_channels=512, kernel_size=4, stride=2),
-			nn.InstanceNorm2d(num_features=512),
-			nn.ReLU(),
-
-			ResBlk(dim_in=512, dim_out=512, normalize=True, downsample=False),
-			ResBlk(dim_in=512, dim_out=config['content_depth'], normalize=True, downsample=False)
-		)
-
-	def forward(self, img):
-		return self.encoder(img)
+		return {
+			'img': self.convs(x),
+			'content_code': content_code
+		}
 
 
 class Discriminator(nn.Module):

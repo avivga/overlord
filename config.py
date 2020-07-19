@@ -1,5 +1,5 @@
 base_config = dict(
-	content_depth=512,
+	content_depth=2,
 	class_dim=64,
 
 	content_std=0,
@@ -9,6 +9,7 @@ base_config = dict(
 		n_epochs=1000,
 
 		learning_rate=dict(
+			latent=1e-3,
 			generator=1e-4,
 			discriminator=1e-4
 		),

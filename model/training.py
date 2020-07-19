@@ -11,8 +11,8 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from model.modules import ContentEncoder, Generator, Discriminator
-from model.utils import NamedTensorDataset, he_init
+from model.modules import Generator, Discriminator
+from model.utils import NamedTensorDataset
 
 
 class Model:
@@ -23,22 +23,30 @@ class Model:
 		self.config = config
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-		self.content_encoder = ContentEncoder(self.config)
-		self.content_encoder.to(self.device)
-
 		self.generator = Generator(self.config)
 		self.generator.to(self.device)
 
 		self.discriminator = Discriminator(self.config)
 		self.discriminator.to(self.device)
 
-		# TODO: class embedding lr
+		self.generator_optimizer = Adam([
+			{
+				'params': itertools.chain(
+					self.generator.content_embedding.parameters(),
+					self.generator.class_embedding.parameters()
+				),
 
-		self.generator_optimizer = Adam(
-			params=itertools.chain(self.content_encoder.parameters(), self.generator.parameters()),
-			lr=self.config['train']['learning_rate']['generator'],
-			betas=(0.0, 0.99), weight_decay=1e-4
-		)
+				'lr': self.config['train']['learning_rate']['latent']
+			},
+			{
+				'params': itertools.chain(
+					self.generator.adains.parameters(),
+					self.generator.convs.parameters()
+				),
+
+				'lr': self.config['train']['learning_rate']['generator']
+			}
+		], betas=(0.0, 0.99), weight_decay=1e-4)
 
 		self.discriminator_optimizer = Adam(
 			params=self.discriminator.parameters(),
@@ -54,7 +62,6 @@ class Model:
 			config = pickle.load(config_fd)
 
 		model = Model(config)
-		model.content_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'content_encoder.pth')))
 		model.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
 		model.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
 
@@ -67,14 +74,12 @@ class Model:
 		with open(os.path.join(checkpoint_dir, 'config.pkl'), 'wb') as config_fd:
 			pickle.dump(self.config, config_fd)
 
-		torch.save(self.content_encoder.state_dict(), os.path.join(checkpoint_dir, 'content_encoder.pth'))
 		torch.save(self.generator.state_dict(), os.path.join(checkpoint_dir, 'generator.pth'))
 		torch.save(self.discriminator.state_dict(), os.path.join(checkpoint_dir, 'discriminator.pth'))
 
 	def clone(self):
 		model = Model(self.config)
 
-		model.content_encoder.load_state_dict(self.content_encoder.state_dict())
 		model.generator.load_state_dict(self.generator.state_dict())
 		model.discriminator.load_state_dict(self.discriminator.state_dict())
 
@@ -94,11 +99,6 @@ class Model:
 		)
 
 		model_ema = self.clone()
-
-		self.content_encoder.apply(he_init)
-		self.generator.apply(he_init)
-		self.discriminator.apply(he_init)
-
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 
 		iteration = 0
@@ -110,7 +110,6 @@ class Model:
 				target_class_ids = np.random.choice(self.config['n_classes'], size=batch['img_id'].shape[0])
 				batch['target_class_id'] = torch.from_numpy(target_class_ids).to(self.device)
 
-				self.content_encoder.train()
 				self.generator.train()
 				self.discriminator.train()
 
@@ -156,11 +155,10 @@ class Model:
 
 	def do_discriminator(self, batch):
 		with torch.no_grad():
-			content_code = self.content_encoder(batch['img'])
-			generated_img = self.generator(content_code, batch['target_class_id'])
+			out = self.generator(batch['img_id'], batch['target_class_id'])
 
 		batch['img'].requires_grad_()  # for gradient penalty
-		discriminator_fake = self.discriminator(generated_img, batch['target_class_id'])
+		discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
 		discriminator_real = self.discriminator(batch['img'], batch['class_id'])
 
 		loss_fake = self.adv_loss(discriminator_fake, 0)
@@ -171,17 +169,15 @@ class Model:
 		return loss_discriminator
 
 	def do_generator(self, batch):
-		content_code = self.content_encoder(batch['img'])
-		generated_img = self.generator(content_code, batch['target_class_id'])
+		out = self.generator(batch['img_id'], batch['target_class_id'])
 
-		discriminator_fake = self.discriminator(generated_img, batch['target_class_id'])
+		discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
 		loss_adversarial = self.adv_loss(discriminator_fake, 1)
 
-		content_code_fake = self.content_encoder(generated_img)
-		reconstructed_img = self.generator(content_code_fake, batch['class_id'])
-		loss_reconstruction = torch.mean(torch.abs(reconstructed_img - batch['img']))
+		out_reconstruction = self.generator(batch['img_id'], batch['class_id'])
+		loss_reconstruction = torch.mean(torch.abs(out_reconstruction['img'] - batch['img']))
 
-		loss_content_decay = torch.sum(content_code ** 2, dim=[1, 2, 3]).mean()
+		loss_content_decay = torch.sum(out['content_code'] ** 2, dim=[1, 2, 3]).mean()
 
 		return {
 			'reconstruction': loss_reconstruction,
@@ -212,7 +208,6 @@ class Model:
 
 	@torch.no_grad()
 	def generate_samples(self, dataset, n_samples=10, randomized=False):
-		self.content_encoder.eval()
 		self.generator.eval()
 
 		random = self.rs if randomized else np.random.RandomState(seed=0)
@@ -221,16 +216,14 @@ class Model:
 		samples = dataset[img_idx]
 		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 
-		content_codes = self.content_encoder(samples['img'])
-
 		blank = torch.ones_like(samples['img'][0])
 		summary = [torch.cat([blank] + list(samples['img']), dim=2)]
 		for i in range(n_samples):
 			converted_imgs = [samples['img'][i]]
 
 			for j in range(n_samples):
-				out = self.generator(content_codes[[j]], samples['class_id'][[i]])
-				converted_imgs.append(out[0])
+				out = self.generator(samples['img_id'][[j]], samples['class_id'][[i]])
+				converted_imgs.append(out['img'][0])
 
 			summary.append(torch.cat(converted_imgs, dim=2))
 
@@ -240,7 +233,6 @@ class Model:
 
 	def update_from(self, other, beta=0.999):
 		pairs = [
-			(self.content_encoder, other.content_encoder),
 			(self.generator, other.generator)
 		]
 
