@@ -30,28 +30,25 @@ class Model:
 		self.discriminator.to(self.device)
 
 		self.generator_optimizer = Adam([
-			{
-				'params': itertools.chain(
-					self.generator.content_embedding.parameters(),
-					self.generator.class_embedding.parameters()
-				),
+				{
+					'params': itertools.chain(
+						self.generator.content_embedding.parameters(),
+						self.generator.class_embedding.parameters()
+					),
 
-				'lr': self.config['train']['learning_rate']['latent']
-			},
-			{
-				'params': itertools.chain(
-					self.generator.adains.parameters(),
-					self.generator.convs.parameters()
-				),
-
-				'lr': self.config['train']['learning_rate']['generator']
-			}
-		], betas=(0.0, 0.99), weight_decay=1e-4)
+					'lr': self.config['train']['learning_rate']['latent']
+				},
+				{
+					'params': self.generator.decoder.parameters(),
+					'lr': self.config['train']['learning_rate']['generator']
+				}
+			], betas=(0.5, 0.999)
+		)
 
 		self.discriminator_optimizer = Adam(
 			params=self.discriminator.parameters(),
 			lr=self.config['train']['learning_rate']['discriminator'],
-			betas=(0.0, 0.99), weight_decay=1e-4
+			betas=(0.5, 0.999)
 		)
 
 		self.rs = np.random.RandomState(seed=1337)
@@ -101,7 +98,6 @@ class Model:
 		model_ema = self.clone()
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 
-		iteration = 0
 		for epoch in range(self.config['train']['n_epochs']):
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
@@ -129,27 +125,24 @@ class Model:
 
 				model_ema.update_from(self)
 
-				pbar.set_description_str('epoch #{} [{}]'.format(epoch, iteration))
+				pbar.set_description_str('epoch #{}'.format(epoch))
 				pbar.set_postfix(gen_loss=loss_generator.item(), disc_loss=loss_discriminator.item())
 
-				if iteration % 1000 == 0:
-					summary.add_scalar(tag='loss/discriminator', scalar_value=loss_discriminator.item(), global_step=iteration)
-					summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=iteration)
-
-					for term, loss in losses_generator.items():
-						summary.add_scalar(tag='loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=iteration)
-
-					samples_fixed = model_ema.generate_samples(dataset, randomized=False)
-					samples_random = model_ema.generate_samples(dataset, randomized=True)
-
-					summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=iteration)
-					summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=iteration)
-
-					model_ema.save(model_dir, iteration)
-
-				iteration += 1
-
 			pbar.close()
+
+			summary.add_scalar(tag='loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
+			summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
+
+			for term, loss in losses_generator.items():
+				summary.add_scalar(tag='loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
+
+			samples_fixed = model_ema.generate_samples(dataset, randomized=False)
+			samples_random = model_ema.generate_samples(dataset, randomized=True)
+
+			summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=epoch)
+			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
+
+			model_ema.save(model_dir, epoch)
 
 		summary.close()
 
