@@ -23,18 +23,26 @@ def train(args):
 	tensorboard_dir = assets.recreate_tensorboard_dir(args.model_name)
 
 	data = np.load(assets.get_preprocess_file_path(args.data_name))
-	imgs = ((data['img'].astype(np.float32) / 255.0) * 2) - 1
+	imgs = data['img']
+	classes = data['class']
+
+	imgs = ((imgs.astype(np.float32) / 255.0) * 2) - 1
+
+	unique_classes = np.unique(classes)
+	class_index = np.arange(np.max(unique_classes) + 1)
+	class_index[unique_classes] = np.arange(unique_classes.size)
+	classes = class_index[classes]
 
 	config = dict(
 		img_shape=imgs.shape[1:],
 		n_imgs=imgs.shape[0],
-		n_classes=np.unique(data['class']).size
+		n_classes=unique_classes.size
 	)
 
 	config.update(base_config)
 
 	model = Model(config)
-	model.train(imgs, data['class'], model_dir, tensorboard_dir)
+	model.train(imgs, classes, model_dir, tensorboard_dir)
 
 
 def main():
