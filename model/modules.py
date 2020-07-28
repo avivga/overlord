@@ -12,12 +12,9 @@ class Generator(nn.Module):
 
 		self.config = config
 
-		self.content_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['content_depth'] * 16 * 16)
-		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_depth'] * 16 * 16)
-
 		self.decoder = nn.Sequential(
 			ResBlk(dim_in=config['content_depth'] + config['class_depth'], dim_out=512, normalize=True, upsample=False),
-			ResBlk(dim_in=512, dim_out=512, normalize=True, upsample=False),
+			ResBlk(dim_in=512, dim_out=512, normalize=True, upsample=True),
 			ResBlk(dim_in=512, dim_out=256, normalize=True, upsample=True),
 			ResBlk(dim_in=256, dim_out=128, normalize=True, upsample=True),
 
@@ -28,10 +25,9 @@ class Generator(nn.Module):
 			nn.Tanh()
 		)
 
-	def forward(self, content_img_id, class_id):
-		batch_size = content_img_id.shape[0]
+	def forward(self, content_code, class_code):
+		batch_size = content_code.shape[0]
 
-		content_code = self.content_embedding(content_img_id)
 		content_code = content_code.view((batch_size, -1, 16, 16))
 
 		if self.training and self.config['content_std'] != 0:
@@ -42,14 +38,11 @@ class Generator(nn.Module):
 		else:
 			content_code_regularized = content_code
 
-		class_code = self.class_embedding(class_id)
 		class_code = class_code.view((batch_size, -1, 16, 16))
-
 		x = torch.cat((content_code_regularized, class_code), dim=1)
 
 		return {
-			'img': self.decoder(x),
-			'content_code': content_code
+			'img': self.decoder(x)
 		}
 
 

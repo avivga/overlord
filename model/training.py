@@ -6,6 +6,7 @@ from tqdm import tqdm
 import numpy as np
 
 import torch
+from torch import nn
 from torch.nn import functional as F
 from torch.optim import Adam
 from torch.utils.data import DataLoader
@@ -23,6 +24,12 @@ class Model:
 		self.config = config
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+		self.content_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['content_depth'] * 16 * 16)
+		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_depth'] * 16 * 16)
+
+		nn.init.uniform_(self.content_embedding.weight, a=-0.05, b=0.05)
+		nn.init.uniform_(self.class_embedding.weight, a=-0.05, b=0.05)
+
 		self.generator = Generator(self.config)
 		self.generator.to(self.device)
 
@@ -32,14 +39,14 @@ class Model:
 		self.generator_optimizer = Adam([
 				{
 					'params': itertools.chain(
-						self.generator.content_embedding.parameters(),
-						self.generator.class_embedding.parameters()
+						self.content_embedding.parameters(),
+						self.class_embedding.parameters()
 					),
 
 					'lr': self.config['train']['learning_rate']['latent']
 				},
 				{
-					'params': self.generator.decoder.parameters(),
+					'params': self.generator.parameters(),
 					'lr': self.config['train']['learning_rate']['generator']
 				}
 			], betas=(0.5, 0.999)
@@ -59,6 +66,8 @@ class Model:
 			config = pickle.load(config_fd)
 
 		model = Model(config)
+		model.content_embedding.load_state_dict(torch.load(os.path.join(model_dir, 'content_embedding.pth')))
+		model.class_embedding.load_state_dict(torch.load(os.path.join(model_dir, 'class_embedding.pth')))
 		model.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
 		model.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
 
@@ -71,12 +80,16 @@ class Model:
 		with open(os.path.join(checkpoint_dir, 'config.pkl'), 'wb') as config_fd:
 			pickle.dump(self.config, config_fd)
 
+		torch.save(self.content_embedding.state_dict(), os.path.join(checkpoint_dir, 'content_embedding.pth'))
+		torch.save(self.class_embedding.state_dict(), os.path.join(checkpoint_dir, 'class_embedding.pth'))
 		torch.save(self.generator.state_dict(), os.path.join(checkpoint_dir, 'generator.pth'))
 		torch.save(self.discriminator.state_dict(), os.path.join(checkpoint_dir, 'discriminator.pth'))
 
 	def clone(self):
 		model = Model(self.config)
 
+		model.content_embedding.load_state_dict(self.content_embedding.state_dict())
+		model.class_embedding.load_state_dict(self.class_embedding.state_dict())
 		model.generator.load_state_dict(self.generator.state_dict())
 		model.discriminator.load_state_dict(self.discriminator.state_dict())
 
@@ -101,16 +114,27 @@ class Model:
 		for epoch in range(self.config['train']['n_epochs']):
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
-				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
-
 				target_class_ids = np.random.choice(self.config['n_classes'], size=batch['img_id'].shape[0])
-				batch['target_class_id'] = torch.from_numpy(target_class_ids).to(self.device)
+				batch['target_class_id'] = torch.from_numpy(target_class_ids)
+
+				batch['content_code'] = self.content_embedding(batch['img_id'])
+				batch['class_code'] = self.class_embedding(batch['class_id'])
+				batch['target_class_code'] = self.class_embedding(batch['target_class_id'])
+
+				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
 				self.generator.train()
 				self.discriminator.train()
 
-				loss_discriminator = self.do_discriminator(batch)
-				self.reset_grads()
+				losses_discriminator = self.do_discriminator(batch)
+				loss_discriminator = (
+					losses_discriminator['fake']
+					+ losses_discriminator['real']
+					+ self.config['train']['loss_weights']['gradient_penalty'] * losses_discriminator['gradient_penalty']
+				)
+
+				self.generator_optimizer.zero_grad()
+				self.discriminator_optimizer.zero_grad()
 				loss_discriminator.backward()
 				self.discriminator_optimizer.step()
 
@@ -119,7 +143,8 @@ class Model:
 				for term, loss in losses_generator.items():
 					loss_generator += self.config['train']['loss_weights'][term] * loss
 
-				self.reset_grads()
+				self.generator_optimizer.zero_grad()
+				self.discriminator_optimizer.zero_grad()
 				loss_generator.backward()
 				self.generator_optimizer.step()
 
@@ -148,7 +173,7 @@ class Model:
 
 	def do_discriminator(self, batch):
 		with torch.no_grad():
-			out = self.generator(batch['img_id'], batch['target_class_id'])
+			out = self.generator(batch['content_code'], batch['target_class_code'])
 
 		batch['img'].requires_grad_()  # for gradient penalty
 		discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
@@ -158,19 +183,22 @@ class Model:
 		loss_real = self.adv_loss(discriminator_real, 1)
 		loss_gp = self.gradient_penalty(discriminator_real, batch['img'])
 
-		loss_discriminator = loss_fake + loss_real + self.config['train']['loss_weights']['gradient_penalty'] * loss_gp
-		return loss_discriminator
+		return {
+			'fake': loss_fake,
+			'real': loss_real,
+			'gradient_penalty': loss_gp
+		}
 
 	def do_generator(self, batch):
-		out = self.generator(batch['img_id'], batch['target_class_id'])
+		out = self.generator(batch['content_code'], batch['target_class_code'])
 
 		discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
 		loss_adversarial = self.adv_loss(discriminator_fake, 1)
 
-		out_reconstruction = self.generator(batch['img_id'], batch['class_id'])
+		out_reconstruction = self.generator(batch['content_code'], batch['class_code'])
 		loss_reconstruction = torch.mean(torch.abs(out_reconstruction['img'] - batch['img']))
 
-		loss_content_decay = torch.sum(out['content_code'] ** 2, dim=[1, 2, 3]).mean()
+		loss_content_decay = torch.sum(batch['content_code'] ** 2, dim=1).mean()
 
 		return {
 			'reconstruction': loss_reconstruction,
@@ -195,10 +223,6 @@ class Model:
 		reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
 		return reg
 
-	def reset_grads(self):
-		self.generator_optimizer.zero_grad()
-		self.discriminator_optimizer.zero_grad()
-
 	@torch.no_grad()
 	def generate_samples(self, dataset, n_samples=10, randomized=False):
 		self.generator.eval()
@@ -207,6 +231,8 @@ class Model:
 		img_idx = torch.from_numpy(random.choice(len(dataset), size=n_samples, replace=False))
 
 		samples = dataset[img_idx]
+		samples['content_code'] = self.content_embedding(samples['img_id'])
+		samples['class_code'] = self.class_embedding(samples['class_id'])
 		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 
 		blank = torch.ones_like(samples['img'][0])
@@ -215,7 +241,7 @@ class Model:
 			converted_imgs = [samples['img'][i]]
 
 			for j in range(n_samples):
-				out = self.generator(samples['img_id'][[j]], samples['class_id'][[i]])
+				out = self.generator(samples['content_code'][[j]], samples['class_code'][[i]])
 				converted_imgs.append(out['img'][0])
 
 			summary.append(torch.cat(converted_imgs, dim=2))
@@ -226,6 +252,8 @@ class Model:
 
 	def update_from(self, other, beta=0.999):
 		pairs = [
+			(self.content_embedding, other.content_embedding),
+			(self.class_embedding, other.class_embedding),
 			(self.generator, other.generator)
 		]
 
