@@ -108,7 +108,6 @@ class Model:
 			shuffle=True, pin_memory=True, drop_last=False
 		)
 
-		model_ema = self.clone()
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 
 		for epoch in range(self.config['train']['n_epochs']):
@@ -148,8 +147,6 @@ class Model:
 				loss_generator.backward()
 				self.generator_optimizer.step()
 
-				model_ema.update_from(self)
-
 				pbar.set_description_str('epoch #{}'.format(epoch))
 				pbar.set_postfix(gen_loss=loss_generator.item(), disc_loss=loss_discriminator.item())
 
@@ -161,13 +158,13 @@ class Model:
 			for term, loss in losses_generator.items():
 				summary.add_scalar(tag='loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
 
-			samples_fixed = model_ema.generate_samples(dataset, randomized=False)
-			samples_random = model_ema.generate_samples(dataset, randomized=True)
+			samples_fixed = self.generate_samples(dataset, randomized=False)
+			samples_random = self.generate_samples(dataset, randomized=True)
 
 			summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=epoch)
 			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
 
-			model_ema.save(model_dir, epoch)
+			self.save(model_dir, epoch)
 
 		summary.close()
 
@@ -249,14 +246,3 @@ class Model:
 		summary = torch.cat(summary, dim=1)
 		summary = ((summary + 1) / 2).clamp(0, 1)
 		return summary
-
-	def update_from(self, other, beta=0.999):
-		pairs = [
-			(self.content_embedding, other.content_embedding),
-			(self.class_embedding, other.class_embedding),
-			(self.generator, other.generator)
-		]
-
-		for model_ema, model in pairs:
-			for param_ema, param in zip(model_ema.parameters(), model.parameters()):
-				param_ema.data = torch.lerp(param.data, param_ema.data, beta)
