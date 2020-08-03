@@ -5,6 +5,10 @@ from tqdm import tqdm
 
 import numpy as np
 
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -75,7 +79,7 @@ class Model:
 
 	def save(self, model_dir, epoch=None):
 		checkpoint_dir = os.path.join(model_dir, '{:08d}'.format(epoch) if epoch is not None else 'current')
-		if not os.path.exist(checkpoint_dir):
+		if not os.path.exists(checkpoint_dir):
 			os.mkdir(checkpoint_dir)
 
 		with open(os.path.join(checkpoint_dir, 'config.pkl'), 'wb') as config_fd:
