@@ -164,6 +164,12 @@ class Model:
 			summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=epoch)
 			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
 
+			if epoch % 5 == 0:
+				content_codes = self.extract_codes(dataset)
+				score_train, score_test = self.classification_score(X=content_codes, y=classes)
+				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
+
 			self.save(model_dir, epoch)
 
 		summary.close()
@@ -246,3 +252,30 @@ class Model:
 		summary = torch.cat(summary, dim=1)
 		summary = ((summary + 1) / 2).clamp(0, 1)
 		return summary
+
+	@staticmethod
+	def classification_score(X, y):
+		scaler = StandardScaler()
+		X = scaler.fit_transform(X)
+
+		X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+		classifier = LogisticRegression(random_state=0)
+		classifier.fit(X_train, y_train)
+
+		acc_train = classifier.score(X_train, y_train)
+		acc_test = classifier.score(X_test, y_test)
+
+		return acc_train, acc_test
+
+	@torch.no_grad()
+	def extract_codes(self, dataset):
+		data_loader = DataLoader(dataset, batch_size=128, shuffle=False, pin_memory=True, drop_last=False)
+
+		content_codes = []
+		for batch in data_loader:
+			batch_content_codes = self.content_embedding(batch['img_id']).view((batch['img_id'].shape[0], -1))
+			content_codes.append(batch_content_codes.numpy())
+
+		content_codes = np.concatenate(content_codes, axis=0)
+		return content_codes

@@ -14,15 +14,13 @@ class Generator(nn.Module):
 
 		self.decoder = nn.Sequential(
 			ResBlk(dim_in=config['content_depth'] + config['class_depth'], dim_out=512, normalize=True, upsample=False),
-			ResBlk(dim_in=512, dim_out=512, normalize=True, upsample=True),
+			# ResBlk(dim_in=512, dim_out=512, normalize=True, upsample=True),
 			ResBlk(dim_in=512, dim_out=256, normalize=True, upsample=True),
 			ResBlk(dim_in=256, dim_out=128, normalize=True, upsample=True),
 
 			nn.InstanceNorm2d(num_features=128, affine=True),
 			nn.LeakyReLU(negative_slope=0.2),
-			nn.Conv2d(in_channels=128, out_channels=3, kernel_size=1, stride=1, padding=0),
-
-			nn.Tanh()
+			nn.Conv2d(in_channels=128, out_channels=3, kernel_size=1, stride=1, padding=0)
 		)
 
 	def forward(self, content_code, class_code):
@@ -54,7 +52,7 @@ class Discriminator(nn.Module):
 		self.config = config
 		img_size = config['img_shape'][0]
 
-		dim_in = 2**14 // img_size
+		dim_in = 64 # 2**14 // img_size
 		blocks = []
 		blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
 
@@ -64,10 +62,10 @@ class Discriminator(nn.Module):
 			blocks += [ResBlk(dim_in, dim_out, downsample=True)]
 			dim_in = dim_out
 
+		# blocks += [nn.LeakyReLU(0.2)]
+		# blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
 		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
-		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, config['n_classes'], 1, 1, 0)]
+		blocks += [nn.Conv2d(dim_out, config['n_classes'], 4, 1, 0)]
 		self.main = nn.Sequential(*blocks)
 
 	def forward(self, x, y):
