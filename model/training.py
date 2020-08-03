@@ -73,9 +73,10 @@ class Model:
 
 		return model
 
-	def save(self, model_dir, iteration):
-		checkpoint_dir = os.path.join(model_dir, '{:08d}'.format(iteration))
-		os.mkdir(checkpoint_dir)
+	def save(self, model_dir, epoch=None):
+		checkpoint_dir = os.path.join(model_dir, '{:08d}'.format(epoch) if epoch is not None else 'current')
+		if not os.path.exist(checkpoint_dir):
+			os.mkdir(checkpoint_dir)
 
 		with open(os.path.join(checkpoint_dir, 'config.pkl'), 'wb') as config_fd:
 			pickle.dump(self.config, config_fd)
@@ -164,13 +165,15 @@ class Model:
 			summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=epoch)
 			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
 
-			if epoch % 5 == 0:
+			if epoch % 10 == 0:
 				content_codes = self.extract_codes(dataset)
 				score_train, score_test = self.classification_score(X=content_codes, y=classes)
 				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
 				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
 
-			self.save(model_dir, epoch)
+				self.save(model_dir, epoch)
+
+			self.save(model_dir)
 
 		summary.close()
 
