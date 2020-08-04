@@ -128,19 +128,6 @@ class Model:
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
 				self.generator.train()
-				self.discriminator.train()
-
-				losses_discriminator = self.do_discriminator(batch)
-				loss_discriminator = (
-					losses_discriminator['fake']
-					+ losses_discriminator['real']
-					+ self.config['train']['loss_weights']['gradient_penalty'] * losses_discriminator['gradient_penalty']
-				)
-
-				self.generator_optimizer.zero_grad()
-				self.discriminator_optimizer.zero_grad()
-				loss_discriminator.backward()
-				self.discriminator_optimizer.step()
 
 				losses_generator = self.do_generator(batch)
 				loss_generator = 0
@@ -148,16 +135,14 @@ class Model:
 					loss_generator += self.config['train']['loss_weights'][term] * loss
 
 				self.generator_optimizer.zero_grad()
-				self.discriminator_optimizer.zero_grad()
 				loss_generator.backward()
 				self.generator_optimizer.step()
 
 				pbar.set_description_str('epoch #{}'.format(epoch))
-				pbar.set_postfix(gen_loss=loss_generator.item(), disc_loss=loss_discriminator.item())
+				pbar.set_postfix(gen_loss=loss_generator.item())
 
 			pbar.close()
 
-			summary.add_scalar(tag='loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
 			summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
 
 			for term, loss in losses_generator.items():
@@ -200,10 +185,10 @@ class Model:
 		}
 
 	def do_generator(self, batch):
-		out = self.generator(batch['content_code'], batch['target_class_code'])
+		# out = self.generator(batch['content_code'], batch['target_class_code'])
 
-		discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
-		loss_adversarial = self.adv_loss(discriminator_fake, 1)
+		# discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
+		# loss_adversarial = self.adv_loss(discriminator_fake, 1)
 
 		out_reconstruction = self.generator(batch['content_code'], batch['class_code'])
 		loss_reconstruction = torch.mean(torch.abs(out_reconstruction['img'] - batch['img']))
@@ -213,7 +198,7 @@ class Model:
 		return {
 			'reconstruction': loss_reconstruction,
 			'content_decay': loss_content_decay,
-			'adversarial': loss_adversarial
+			# 'adversarial': loss_adversarial
 		}
 
 	def adv_loss(self, logits, target):
