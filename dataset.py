@@ -295,10 +295,42 @@ class CelebA(DataSet):
 		}
 
 
+class Cars3D(DataSet):
+
+	def __init__(self, base_dir, extras):
+		super().__init__(base_dir, extras)
+
+		self.__data_path = os.path.join(base_dir, 'cars3d.npz')
+
+	def read(self):
+		imgs = np.load(self.__data_path)['imgs']
+
+		elevations = np.empty(shape=(imgs.shape[0],), dtype=np.int64)
+		azimuths = np.empty(shape=(imgs.shape[0], ), dtype=np.int64)
+		objects = np.empty(shape=(imgs.shape[0],), dtype=np.int64)
+
+		for elevation_id in range(4):
+			for azimuth_id in range(24):
+				for object_id in range(183):
+					img_idx = elevation_id * 24 * 183 + azimuth_id * 183 + object_id
+
+					elevations[img_idx] = elevation_id
+					azimuths[img_idx] = azimuth_id
+					objects[img_idx] = object_id
+
+		return {
+			'img': imgs,
+			'elevation': elevations,
+			'azimuth': azimuths,
+			'class': objects
+		}
+
+
 supported_datasets = {
 	'afhq': AFHQ,
 	'animalfaces': AnimalFaces,
 	'cub': Cub,
 	'edges2shoes': Edges2Shoes,
-	'celeba': CelebA
+	'celeba': CelebA,
+	'cars3d': Cars3D
 }
