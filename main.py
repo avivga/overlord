@@ -26,7 +26,7 @@ def train(args):
 	imgs = data['img']
 	classes = data['class']
 
-	imgs = ((imgs.astype(np.float32) / 255.0) * 2) - 1
+	imgs = imgs.astype(np.float32) / 255.0
 
 	unique_classes = np.unique(classes)
 	class_index = np.arange(np.max(unique_classes) + 1)

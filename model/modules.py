@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torchvision import models
 
 
 class Generator(nn.Module):
@@ -20,7 +21,9 @@ class Generator(nn.Module):
 
 			nn.InstanceNorm2d(num_features=128, affine=True),
 			nn.LeakyReLU(negative_slope=0.2),
-			nn.Conv2d(in_channels=128, out_channels=3, kernel_size=1, stride=1, padding=0)
+			nn.Conv2d(in_channels=128, out_channels=3, kernel_size=1, stride=1, padding=0),
+
+			nn.Sigmoid()
 		)
 
 	def forward(self, content_code, class_code):
@@ -133,3 +136,44 @@ class ResBlk(nn.Module):
 	def forward(self, x):
 		x = self._shortcut(x) + self._residual(x)
 		return x / np.sqrt(2)  # unit variance
+
+
+class NetVGGFeatures(nn.Module):
+
+	def __init__(self, layer_ids):
+		super().__init__()
+
+		self.vggnet = models.vgg16(pretrained=True)
+		self.layer_ids = layer_ids
+
+	def forward(self, x):
+		output = []
+		for i in range(self.layer_ids[-1] + 1):
+			x = self.vggnet.features[i](x)
+
+			if i in self.layer_ids:
+				output.append(x)
+
+		return output
+
+
+class VGGDistance(nn.Module):
+
+	def __init__(self, layer_ids):
+		super().__init__()
+
+		self.vgg = NetVGGFeatures(layer_ids)
+		self.layer_ids = layer_ids
+
+	def forward(self, I1, I2):
+		b_sz = I1.size(0)
+		f1 = self.vgg(I1)
+		f2 = self.vgg(I2)
+
+		loss = torch.abs(I1 - I2).view(b_sz, -1).mean(1)
+
+		for i in range(len(self.layer_ids)):
+			layer_loss = torch.abs(f1[i] - f2[i]).view(b_sz, -1).mean(1)
+			loss = loss + layer_loss
+
+		return loss.mean()

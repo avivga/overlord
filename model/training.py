@@ -16,7 +16,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from model.modules import Generator, Discriminator
+from model.modules import Generator, Discriminator, VGGDistance
 from model.utils import NamedTensorDataset
 
 
@@ -61,6 +61,8 @@ class Model:
 			lr=self.config['train']['learning_rate']['discriminator'],
 			betas=(0.5, 0.999)
 		)
+
+		self.perceptual_loss = VGGDistance(self.config['perceptual_loss']['layers']).to(self.device)
 
 		self.rs = np.random.RandomState(seed=1337)
 
@@ -191,7 +193,7 @@ class Model:
 		# loss_adversarial = self.adv_loss(discriminator_fake, 1)
 
 		out_reconstruction = self.generator(batch['content_code'], batch['class_code'])
-		loss_reconstruction = torch.mean(torch.abs(out_reconstruction['img'] - batch['img']))
+		loss_reconstruction = self.perceptual_loss(out_reconstruction['img'], batch['img'])
 
 		loss_content_decay = torch.sum(batch['content_code'] ** 2, dim=1).mean()
 
@@ -242,7 +244,6 @@ class Model:
 			summary.append(torch.cat(converted_imgs, dim=2))
 
 		summary = torch.cat(summary, dim=1)
-		summary = ((summary + 1) / 2).clamp(0, 1)
 		return summary
 
 	@staticmethod

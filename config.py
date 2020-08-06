@@ -2,7 +2,11 @@ base_config = dict(
 	content_depth=1,
 	class_depth=256,
 
-	content_std=0,
+	content_std=1,
+
+	perceptual_loss=dict(
+		layers=[2, 7, 12, 21, 30]
+	),
 
 	train=dict(
 		batch_size=64,
@@ -16,7 +20,7 @@ base_config = dict(
 
 		loss_weights=dict(
 			reconstruction=1,
-			content_decay=0,
+			content_decay=1e-4,
 			adversarial=0,
 			gradient_penalty=0
 		)
