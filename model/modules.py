@@ -30,7 +30,6 @@ class Generator(nn.Module):
 		batch_size = content_code.shape[0]
 
 		content_code = content_code.view((batch_size, -1, 16, 16))
-
 		if self.training and self.config['content_std'] != 0:
 			noise = torch.zeros_like(content_code)
 			noise.normal_(mean=0, std=self.config['content_std'])
@@ -42,9 +41,7 @@ class Generator(nn.Module):
 		class_code = class_code.view((batch_size, -1, 16, 16))
 		x = torch.cat((content_code_regularized, class_code), dim=1)
 
-		return {
-			'img': self.decoder(x)
-		}
+		return self.decoder(x)
 
 
 class Discriminator(nn.Module):

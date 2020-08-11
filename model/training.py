@@ -40,28 +40,6 @@ class Model:
 		self.discriminator = Discriminator(self.config)
 		self.discriminator.to(self.device)
 
-		self.generator_optimizer = Adam([
-				{
-					'params': itertools.chain(
-						self.content_embedding.parameters(),
-						self.class_embedding.parameters()
-					),
-
-					'lr': self.config['train']['learning_rate']['latent']
-				},
-				{
-					'params': self.generator.parameters(),
-					'lr': self.config['train']['learning_rate']['generator']
-				}
-			], betas=(0.5, 0.999)
-		)
-
-		self.discriminator_optimizer = Adam(
-			params=self.discriminator.parameters(),
-			lr=self.config['train']['learning_rate']['discriminator'],
-			betas=(0.5, 0.999)
-		)
-
 		self.perceptual_loss = VGGDistance(self.config['perceptual_loss']['layers']).to(self.device)
 
 		self.rs = np.random.RandomState(seed=1337)
@@ -92,16 +70,6 @@ class Model:
 		torch.save(self.generator.state_dict(), os.path.join(checkpoint_dir, 'generator.pth'))
 		torch.save(self.discriminator.state_dict(), os.path.join(checkpoint_dir, 'discriminator.pth'))
 
-	def clone(self):
-		model = Model(self.config)
-
-		model.content_embedding.load_state_dict(self.content_embedding.state_dict())
-		model.class_embedding.load_state_dict(self.class_embedding.state_dict())
-		model.generator.load_state_dict(self.generator.state_dict())
-		model.discriminator.load_state_dict(self.discriminator.state_dict())
-
-		return model
-
 	def train(self, imgs, classes, model_dir, tensorboard_dir):
 		data = dict(
 			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
@@ -115,30 +83,39 @@ class Model:
 			shuffle=True, pin_memory=True, drop_last=False
 		)
 
-		summary = SummaryWriter(log_dir=tensorboard_dir)
+		generator_optimizer = Adam([
+			{
+				'params': itertools.chain(
+					self.content_embedding.parameters(),
+					self.class_embedding.parameters()
+				),
 
+				'lr': self.config['train']['learning_rate']['latent']
+			},
+			{
+				'params': self.generator.parameters(),
+				'lr': self.config['train']['learning_rate']['generator']
+			}
+		], betas=(0.5, 0.999))
+
+		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['train']['n_epochs']):
+			self.generator.train()
+
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
-				target_class_ids = np.random.choice(self.config['n_classes'], size=batch['img_id'].shape[0])
-				batch['target_class_id'] = torch.from_numpy(target_class_ids)
-
 				batch['content_code'] = self.content_embedding(batch['img_id'])
 				batch['class_code'] = self.class_embedding(batch['class_id'])
-				batch['target_class_code'] = self.class_embedding(batch['target_class_id'])
-
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
-				self.generator.train()
-
-				losses_generator = self.do_generator(batch)
+				losses_generator = self.do_generator(batch, content_decay=True, adversarial=False)
 				loss_generator = 0
 				for term, loss in losses_generator.items():
 					loss_generator += self.config['train']['loss_weights'][term] * loss
 
-				self.generator_optimizer.zero_grad()
+				generator_optimizer.zero_grad()
 				loss_generator.backward()
-				self.generator_optimizer.step()
+				generator_optimizer.step()
 
 				pbar.set_description_str('epoch #{}'.format(epoch))
 				pbar.set_postfix(gen_loss=loss_generator.item())
@@ -162,7 +139,89 @@ class Model:
 				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
 				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
 
-				self.save(model_dir, epoch)
+			self.save(model_dir)
+
+		summary.close()
+
+	def gan(self, imgs, classes, model_dir, tensorboard_dir):
+		data = dict(
+			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
+			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
+			class_id=torch.from_numpy(classes.astype(np.int64))
+		)
+
+		dataset = NamedTensorDataset(data)
+		data_loader = DataLoader(
+			dataset, batch_size=self.config['gan']['batch_size'],
+			shuffle=True, pin_memory=True, drop_last=False
+		)
+
+		generator_optimizer = Adam(
+			params=self.generator.parameters(),
+			lr=self.config['gan']['learning_rate']['generator'],
+			betas=(0.5, 0.999)
+		)
+
+		discriminator_optimizer = Adam(
+			params=self.discriminator.parameters(),
+			lr=self.config['gan']['learning_rate']['discriminator'],
+			betas=(0.5, 0.999)
+		)
+
+		summary = SummaryWriter(log_dir=tensorboard_dir)
+		for epoch in range(self.config['gan']['n_epochs']):
+			self.generator.train()
+			self.discriminator.train()
+
+			pbar = tqdm(iterable=data_loader)
+			for batch in pbar:
+				target_class_ids = np.random.choice(self.config['n_classes'], size=batch['img_id'].shape[0])
+				batch['target_class_id'] = torch.from_numpy(target_class_ids)
+
+				batch['content_code'] = self.content_embedding(batch['img_id'])
+				batch['class_code'] = self.class_embedding(batch['class_id'])
+				batch['target_class_code'] = self.class_embedding(batch['target_class_id'])
+
+				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
+
+				losses_discriminator = self.do_discriminator(batch)
+				loss_discriminator = (
+					losses_discriminator['fake']
+					+ losses_discriminator['real']
+					+ self.config['gan']['loss_weights']['gradient_penalty'] * losses_discriminator['gradient_penalty']
+				)
+
+				generator_optimizer.zero_grad()
+				discriminator_optimizer.zero_grad()
+				loss_discriminator.backward()
+				discriminator_optimizer.step()
+
+				losses_generator = self.do_generator(batch, content_decay=False, adversarial=True)
+				loss_generator = 0
+				for term, loss in losses_generator.items():
+					loss_generator += self.config['gan']['loss_weights'][term] * loss
+
+				generator_optimizer.zero_grad()
+				discriminator_optimizer.zero_grad()
+				loss_generator.backward()
+				generator_optimizer.step()
+
+				pbar.set_description_str('epoch #{}'.format(epoch))
+				pbar.set_postfix(gen_loss=loss_generator.item(), disc_loss=loss_discriminator.item())
+
+			pbar.close()
+
+			summary.add_scalar(tag='gan_loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
+			summary.add_scalar(tag='gan_loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
+
+			for term, loss in losses_generator.items():
+				summary.add_scalar(tag='gan_loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
+
+			samples_fixed = self.generate_samples(dataset, randomized=False)
+			samples_random = self.generate_samples(dataset, randomized=True)
+
+			summary.add_image(tag='gan/samples-fixed', img_tensor=samples_fixed, global_step=epoch)
+			summary.add_image(tag='gan/samples-random', img_tensor=samples_random, global_step=epoch)
 
 			self.save(model_dir)
 
@@ -170,10 +229,10 @@ class Model:
 
 	def do_discriminator(self, batch):
 		with torch.no_grad():
-			out = self.generator(batch['content_code'], batch['target_class_code'])
+			img_converted = self.generator(batch['content_code'], batch['target_class_code'])
 
 		batch['img'].requires_grad_()  # for gradient penalty
-		discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
+		discriminator_fake = self.discriminator(img_converted, batch['target_class_id'])
 		discriminator_real = self.discriminator(batch['img'], batch['class_id'])
 
 		loss_fake = self.adv_loss(discriminator_fake, 0)
@@ -186,22 +245,23 @@ class Model:
 			'gradient_penalty': loss_gp
 		}
 
-	def do_generator(self, batch):
-		# out = self.generator(batch['content_code'], batch['target_class_code'])
+	def do_generator(self, batch, content_decay=False, adversarial=False):
+		img_reconstructed = self.generator(batch['content_code'], batch['class_code'])
+		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
 
-		# discriminator_fake = self.discriminator(out['img'], batch['target_class_id'])
-		# loss_adversarial = self.adv_loss(discriminator_fake, 1)
-
-		out_reconstruction = self.generator(batch['content_code'], batch['class_code'])
-		loss_reconstruction = self.perceptual_loss(out_reconstruction['img'], batch['img'])
-
-		loss_content_decay = torch.sum(batch['content_code'] ** 2, dim=1).mean()
-
-		return {
-			'reconstruction': loss_reconstruction,
-			'content_decay': loss_content_decay,
-			# 'adversarial': loss_adversarial
+		losses = {
+			'reconstruction': loss_reconstruction
 		}
+
+		if content_decay:
+			losses['content_decay'] = torch.sum(batch['content_code'] ** 2, dim=1).mean()
+
+		if adversarial:
+			img_converted = self.generator(batch['content_code'], batch['target_class_code'])
+			discriminator_fake = self.discriminator(img_converted, batch['target_class_id'])
+			losses['adversarial'] = self.adv_loss(discriminator_fake, 1)
+
+		return losses
 
 	def adv_loss(self, logits, target):
 		assert target in [1, 0]
@@ -238,8 +298,8 @@ class Model:
 			converted_imgs = [samples['img'][i]]
 
 			for j in range(n_samples):
-				out = self.generator(samples['content_code'][[j]], samples['class_code'][[i]])
-				converted_imgs.append(out['img'][0])
+				converted_img = self.generator(samples['content_code'][[j]], samples['class_code'][[i]])
+				converted_imgs.append(converted_img[0])
 
 			summary.append(torch.cat(converted_imgs, dim=2))
 

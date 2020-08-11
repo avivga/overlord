@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import numpy as np
 
@@ -45,6 +46,28 @@ def train(args):
 	model.train(imgs, classes, model_dir, tensorboard_dir)
 
 
+def gan(args):
+	assets = AssetManager(args.base_dir)
+	model_dir = assets.get_model_dir(args.model_name)
+	tensorboard_dir = assets.get_tensorboard_dir(args.model_name)
+
+	data = np.load(assets.get_preprocess_file_path(args.data_name))
+	imgs = data['img']
+	classes = data['class']
+
+	imgs = imgs.astype(np.float32) / 255.0
+
+	unique_classes = np.unique(classes)
+	class_index = np.arange(np.max(unique_classes) + 1)
+	class_index[unique_classes] = np.arange(unique_classes.size)
+	classes = class_index[classes]
+
+	model = Model.load(os.path.join(model_dir, args.checkpoint_id))
+	model.config.update(base_config)
+
+	model.gan(imgs, classes, model_dir, tensorboard_dir)
+
+
 def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('-bd', '--base-dir', type=str, required=True)
@@ -62,6 +85,12 @@ def main():
 	train_parser.add_argument('-dn', '--data-name', type=str, required=True)
 	train_parser.add_argument('-mn', '--model-name', type=str, required=True)
 	train_parser.set_defaults(func=train)
+
+	gan_parser = action_parsers.add_parser('gan')
+	gan_parser.add_argument('-dn', '--data-name', type=str, required=True)
+	gan_parser.add_argument('-mn', '--model-name', type=str, required=True)
+	gan_parser.add_argument('-cid', '--checkpoint-id', type=str, required=True)
+	gan_parser.set_defaults(func=gan)
 
 	args, extras = parser.parse_known_args()
 	if len(extras) == 0:
