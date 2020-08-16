@@ -16,8 +16,8 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from model.modules import Generator, Discriminator, VGGDistance
-from model.utils import NamedTensorDataset
+from network.modules import Generator, VGGDistance
+from network.utils import NamedTensorDataset
 
 
 class Model:
@@ -28,8 +28,8 @@ class Model:
 		self.config = config
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-		self.content_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['content_depth'] * 16 * 16)
-		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_depth'] * 16 * 16)
+		self.content_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['content_depth'] * 4 * 4)
+		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_depth'])
 
 		nn.init.uniform_(self.content_embedding.weight, a=-0.05, b=0.05)
 		nn.init.uniform_(self.class_embedding.weight, a=-0.05, b=0.05)
@@ -37,10 +37,10 @@ class Model:
 		self.generator = Generator(self.config)
 		self.generator.to(self.device)
 
-		self.discriminator = Discriminator(self.config)
-		self.discriminator.to(self.device)
+		# self.discriminator = Discriminator(self.config)
+		# self.discriminator.to(self.device)
 
-		self.perceptual_loss = VGGDistance(self.config['perceptual_loss']['layers']).to(self.device)
+		self.perceptual_loss = nn.L1Loss()# VGGDistance(self.config['perceptual_loss']['layers']).to(self.device)
 
 		self.rs = np.random.RandomState(seed=1337)
 
@@ -53,7 +53,7 @@ class Model:
 		model.content_embedding.load_state_dict(torch.load(os.path.join(model_dir, 'content_embedding.pth')))
 		model.class_embedding.load_state_dict(torch.load(os.path.join(model_dir, 'class_embedding.pth')))
 		model.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
-		model.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
+		# model.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
 
 		return model
 
@@ -68,7 +68,7 @@ class Model:
 		torch.save(self.content_embedding.state_dict(), os.path.join(checkpoint_dir, 'content_embedding.pth'))
 		torch.save(self.class_embedding.state_dict(), os.path.join(checkpoint_dir, 'class_embedding.pth'))
 		torch.save(self.generator.state_dict(), os.path.join(checkpoint_dir, 'generator.pth'))
-		torch.save(self.discriminator.state_dict(), os.path.join(checkpoint_dir, 'discriminator.pth'))
+		# torch.save(self.discriminator.state_dict(), os.path.join(checkpoint_dir, 'discriminator.pth'))
 
 	def train(self, imgs, classes, model_dir, tensorboard_dir):
 		data = dict(

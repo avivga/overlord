@@ -5,7 +5,7 @@ import numpy as np
 
 import dataset
 from assets import AssetManager
-from model.training import Model
+from network.training import Model
 from config import base_config
 
 
