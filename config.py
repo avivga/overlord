@@ -1,6 +1,6 @@
 base_config = dict(
-	content_depth=16,
-	class_depth=256,
+	content_depth=64,
+	class_depth=512,
 
 	content_std=0,
 
@@ -9,7 +9,7 @@ base_config = dict(
 	),
 
 	train=dict(
-		batch_size=16,
+		batch_size=32,
 		n_epochs=1000,
 
 		learning_rate=dict(

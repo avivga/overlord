@@ -28,19 +28,19 @@ class Model:
 		self.config = config
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-		self.content_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['content_depth'] * 4 * 4)
+		self.content_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['content_depth'])
 		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_depth'])
 
 		nn.init.uniform_(self.content_embedding.weight, a=-0.05, b=0.05)
 		nn.init.uniform_(self.class_embedding.weight, a=-0.05, b=0.05)
 
-		self.generator = Generator(self.config)
+		self.generator = Generator(self.config['img_shape'][0], style_dim=config['content_depth'] + config['class_depth'])
 		self.generator.to(self.device)
 
 		# self.discriminator = Discriminator(self.config)
 		# self.discriminator.to(self.device)
 
-		self.perceptual_loss = nn.L1Loss()# VGGDistance(self.config['perceptual_loss']['layers']).to(self.device)
+		self.perceptual_loss = VGGDistance(self.config['perceptual_loss']['layers']).to(self.device)
 
 		self.rs = np.random.RandomState(seed=1337)
 
@@ -304,7 +304,7 @@ class Model:
 			summary.append(torch.cat(converted_imgs, dim=2))
 
 		summary = torch.cat(summary, dim=1)
-		return summary
+		return summary.clamp(min=0, max=1)
 
 	@staticmethod
 	def classification_score(X, y):

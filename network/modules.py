@@ -2,263 +2,164 @@ import math
 import numpy as np
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 from torchvision import models
 
-from model import (
-	StyledConv,
-	Blur,
-	EqualLinear,
-	EqualConv2d,
-	ScaledLeakyReLU
-)
-
-from op import FusedLeakyReLU
+from model import ConstantInput, ToRGB, ModulatedConv2d, FusedLeakyReLU
 
 
 class Generator(nn.Module):
 
-	def __init__(self, config, channel=32, structure_channel=8, texture_channel=256, blur_kernel=(1, 3, 3, 1)):
+	def __init__(self, size, style_dim, channel_multiplier=2, blur_kernel=[1, 3, 3, 1]):
 		super().__init__()
 
-		self.config = config
+		self.size = size
+		self.style_dim = style_dim
 
-		ch_multiplier = (4, 8, 12, 16, 16, 16, 8, 4)
-		upsample = (False, False, False, False, True, True, True, True)
+		self.channels = {
+			4: 512,
+			8: 512,
+			16: 512,
+			32: 512,
+			64: 256 * channel_multiplier,
+			128: 128 * channel_multiplier,
+			256: 64 * channel_multiplier,
+			512: 32 * channel_multiplier,
+			1024: 16 * channel_multiplier,
+		}
 
-		self.layers = nn.ModuleList()
-		in_ch = structure_channel
-		for ch_mul, up in zip(ch_multiplier, upsample):
-			self.layers.append(StyledResBlock(in_ch, channel * ch_mul, texture_channel, up, blur_kernel))
-			in_ch = channel * ch_mul
+		self.input = ConstantInput(self.channels[4])
+		self.conv1 = StyledConv(self.channels[4], self.channels[4], 3, style_dim, blur_kernel=blur_kernel)
+		self.to_rgb1 = ToRGB(self.channels[4], style_dim, upsample=False)
 
-		self.to_rgb = nn.Sequential(
-			ConvLayer(in_ch, 3, 1, activate=False),
-			nn.Sigmoid()
+		self.log_size = int(math.log(size, 2))
+		self.num_layers = (self.log_size - 2) * 2 + 1
+
+		self.convs = nn.ModuleList()
+		self.upsamples = nn.ModuleList()
+		self.to_rgbs = nn.ModuleList()
+		self.noises = nn.Module()
+
+		in_channel = self.channels[4]
+
+		for i in range(3, self.log_size + 1):
+			out_channel = self.channels[2 ** i]
+
+			self.convs.append(
+				StyledConv(
+					in_channel,
+					out_channel,
+					3,
+					style_dim,
+					upsample=True,
+					blur_kernel=blur_kernel,
+				)
+			)
+
+			self.convs.append(StyledConv(out_channel, out_channel, 3, style_dim, blur_kernel=blur_kernel))
+			self.to_rgbs.append(ToRGB(out_channel, style_dim))
+
+			in_channel = out_channel
+
+		self.n_latent = self.log_size * 2 - 2
+
+	def forward(self, content_codes, class_codes):
+		styles = torch.cat((content_codes, class_codes), dim=1)
+		latent = styles.unsqueeze(dim=1).repeat(1, self.n_latent, 1)
+		# latent = styles.view((-1, self.n_latent, 512))
+
+		out = self.input(latent)
+		out = self.conv1(out, latent[:, 0])
+
+		skip = self.to_rgb1(out, latent[:, 1])
+
+		i = 1
+		for conv1, conv2, to_rgb in zip(self.convs[::2], self.convs[1::2], self.to_rgbs):
+			out = conv1(out, latent[:, i])
+			out = conv2(out, latent[:, i + 1])
+			skip = to_rgb(out, latent[:, i + 2], skip)
+
+			i += 2
+
+		image = skip
+		return image
+
+
+class StyledConv(nn.Module):
+	def __init__(
+			self,
+			in_channel,
+			out_channel,
+			kernel_size,
+			style_dim,
+			upsample=False,
+			blur_kernel=[1, 3, 3, 1],
+			demodulate=True,
+	):
+		super().__init__()
+
+		self.conv = ModulatedConv2d(
+			in_channel,
+			out_channel,
+			kernel_size,
+			style_dim,
+			upsample=upsample,
+			blur_kernel=blur_kernel,
+			demodulate=demodulate,
 		)
 
-	def forward(self, content_code, class_code):
-		batch_size = content_code.shape[0]
+		# self.noise = NoiseInjection()
+		# self.bias = nn.Parameter(torch.zeros(1, out_channel, 1, 1))
+		# self.activate = ScaledLeakyReLU(0.2)
+		self.activate = FusedLeakyReLU(out_channel)
 
-		content_code = content_code.view((batch_size, -1, 4, 4))
-		if self.training and self.config['content_std'] != 0:
-			noise = torch.zeros_like(content_code)
-			noise.normal_(mean=0, std=self.config['content_std'])
+	def forward(self, input, style):
+		out = self.conv(input, style)
+		# out = self.noise(out, noise=noise)
+		# out = out + self.bias
+		out = self.activate(out)
 
-			out = content_code + noise
-		else:
-			out = content_code
-
-		for layer in self.layers:
-			out = layer(out, class_code, None)
-
-		out = self.to_rgb(out)
 		return out
 
 
 # class Generator(nn.Module):
 #
-# 	def __init__(self, config):
+# 	def __init__(self, config, channel=32, structure_channel=8, texture_channel=256, blur_kernel=(1, 3, 3, 1)):
 # 		super().__init__()
 #
 # 		self.config = config
 #
-# 		self.decoder = nn.Sequential(
-# 			ResBlk(dim_in=config['content_depth'] + config['class_depth'], dim_out=512, normalize=True, upsample=False),
-# 			# ResBlk(dim_in=512, dim_out=512, normalize=True, upsample=True),
-# 			ResBlk(dim_in=512, dim_out=256, normalize=True, upsample=True),
-# 			ResBlk(dim_in=256, dim_out=128, normalize=True, upsample=True),
+# 		ch_multiplier = (4, 8, 12, 16, 16, 16, 8, 4)
+# 		upsample = (False, False, False, False, True, True, True, True)
 #
-# 			nn.InstanceNorm2d(num_features=128, affine=True),
-# 			nn.LeakyReLU(negative_slope=0.2),
-# 			nn.Conv2d(in_channels=128, out_channels=3, kernel_size=1, stride=1, padding=0),
+# 		self.layers = nn.ModuleList()
+# 		in_ch = structure_channel
+# 		for ch_mul, up in zip(ch_multiplier, upsample):
+# 			self.layers.append(StyledResBlock(in_ch, channel * ch_mul, texture_channel, up, blur_kernel))
+# 			in_ch = channel * ch_mul
 #
+# 		self.to_rgb = nn.Sequential(
+# 			ConvLayer(in_ch, 3, 1, activate=False),
 # 			nn.Sigmoid()
 # 		)
 #
 # 	def forward(self, content_code, class_code):
 # 		batch_size = content_code.shape[0]
 #
-# 		content_code = content_code.view((batch_size, -1, 16, 16))
+# 		content_code = content_code.view((batch_size, -1, 4, 4))
 # 		if self.training and self.config['content_std'] != 0:
 # 			noise = torch.zeros_like(content_code)
 # 			noise.normal_(mean=0, std=self.config['content_std'])
 #
-# 			content_code_regularized = content_code + noise
+# 			out = content_code + noise
 # 		else:
-# 			content_code_regularized = content_code
+# 			out = content_code
 #
-# 		class_code = class_code.view((batch_size, -1, 16, 16))
-# 		x = torch.cat((content_code_regularized, class_code), dim=1)
+# 		for layer in self.layers:
+# 			out = layer(out, class_code, None)
 #
-# 		return self.decoder(x)
-
-
-class EqualConvTranspose2d(nn.Module):
-	def __init__(
-			self, in_channel, out_channel, kernel_size, stride=1, padding=0, bias=True
-	):
-		super().__init__()
-
-		self.weight = nn.Parameter(
-			torch.randn(in_channel, out_channel, kernel_size, kernel_size)
-		)
-		self.scale = 1 / math.sqrt(in_channel * kernel_size ** 2)
-
-		self.stride = stride
-		self.padding = padding
-
-		if bias:
-			self.bias = nn.Parameter(torch.zeros(out_channel))
-
-		else:
-			self.bias = None
-
-	def forward(self, input):
-		out = F.conv_transpose2d(
-			input,
-			self.weight * self.scale,
-			bias=self.bias,
-			stride=self.stride,
-			padding=self.padding,
-			)
-
-		return out
-
-	def __repr__(self):
-		return (
-			f"{self.__class__.__name__}({self.weight.shape[0]}, {self.weight.shape[1]},"
-			f" {self.weight.shape[2]}, stride={self.stride}, padding={self.padding})"
-		)
-
-
-class ConvLayer(nn.Sequential):
-	def __init__(
-			self,
-			in_channel,
-			out_channel,
-			kernel_size,
-			upsample=False,
-			downsample=False,
-			blur_kernel=(1, 3, 3, 1),
-			bias=True,
-			activate=True,
-			padding="zero",
-	):
-		layers = []
-
-		self.padding = 0
-		stride = 1
-
-		if downsample:
-			factor = 2
-			p = (len(blur_kernel) - factor) + (kernel_size - 1)
-			pad0 = (p + 1) // 2
-			pad1 = p // 2
-
-			layers.append(Blur(blur_kernel, pad=(pad0, pad1)))
-
-			stride = 2
-
-		if upsample:
-			layers.append(
-				EqualConvTranspose2d(
-					in_channel,
-					out_channel,
-					kernel_size,
-					padding=0,
-					stride=2,
-					bias=bias and not activate,
-				)
-			)
-
-			factor = 2
-			p = (len(blur_kernel) - factor) + (kernel_size - 1)
-			pad0 = (p + 1) // 2 + factor - 1
-			pad1 = p // 2 + 1
-
-			layers.append(Blur(blur_kernel, pad=(pad0, pad1)))
-
-		else:
-			if not downsample:
-				if padding == "zero":
-					self.padding = (kernel_size - 1) // 2
-
-				elif padding == "reflect":
-					padding = (kernel_size - 1) // 2
-
-					if padding > 0:
-						layers.append(nn.ReflectionPad2d(padding))
-
-					self.padding = 0
-
-				elif padding != "valid":
-					raise ValueError('Padding should be "zero", "reflect", or "valid"')
-
-			layers.append(
-				EqualConv2d(
-					in_channel,
-					out_channel,
-					kernel_size,
-					padding=self.padding,
-					stride=stride,
-					bias=bias and not activate,
-				)
-			)
-
-		if activate:
-			if bias:
-				layers.append(FusedLeakyReLU(out_channel))
-
-			else:
-				layers.append(ScaledLeakyReLU(0.2))
-
-		super().__init__(*layers)
-
-
-class StyledResBlock(nn.Module):
-	def __init__(
-			self, in_channel, out_channel, style_dim, upsample, blur_kernel=(1, 3, 3, 1)
-	):
-		super().__init__()
-
-		self.conv1 = StyledConv(
-			in_channel,
-			out_channel,
-			3,
-			style_dim,
-			upsample=upsample,
-			blur_kernel=blur_kernel,
-		)
-
-		self.conv2 = StyledConv(out_channel, out_channel, 3, style_dim)
-
-		if upsample or in_channel != out_channel:
-			self.skip = ConvLayer(
-				in_channel,
-				out_channel,
-				1,
-				upsample=upsample,
-				blur_kernel=blur_kernel,
-				bias=False,
-				activate=False,
-			)
-
-		else:
-			self.skip = None
-
-	def forward(self, input, style, noise=None):
-		out = self.conv1(input, style, noise)
-		out = self.conv2(out, style, noise)
-
-		if self.skip is not None:
-			skip = self.skip(input)
-
-		else:
-			skip = input
-
-		return (out + skip) / math.sqrt(2)
+# 		out = self.to_rgb(out)
+# 		return out
 
 
 class NetVGGFeatures(nn.Module):
