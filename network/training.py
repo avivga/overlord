@@ -16,7 +16,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from network.modules import Generator, VGGDistance
+from network.modules import Generator, VGGFeatures, VGGDistance, VGGStyle
 from network.utils import NamedTensorDataset
 
 
@@ -28,19 +28,29 @@ class Model:
 		self.config = config
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-		self.content_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['content_depth'])
-		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_depth'])
+		self.content_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['content_dim'])
+		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_dim'])
 
 		nn.init.uniform_(self.content_embedding.weight, a=-0.05, b=0.05)
 		nn.init.uniform_(self.class_embedding.weight, a=-0.05, b=0.05)
 
-		self.generator = Generator(self.config['img_shape'][0], style_dim=config['content_depth'] + config['class_depth'])
+		self.generator = Generator(
+			size=config['img_shape'][0],
+			latent_dim=config['content_dim'] + config['class_dim'] + config['style_dim'],
+			style_descriptor_dim=config['style_descriptor']['dim'],
+			style_latent_dim=config['style_dim']
+		)
+
 		self.generator.to(self.device)
 
 		# self.discriminator = Discriminator(self.config)
 		# self.discriminator.to(self.device)
 
-		self.perceptual_loss = VGGDistance(self.config['perceptual_loss']['layers']).to(self.device)
+		vgg_features = VGGFeatures()
+		vgg_features.to(self.device)
+
+		self.perceptual_loss = VGGDistance(vgg_features, config['perceptual_loss']['layers'])
+		self.style_descriptor = VGGStyle(vgg_features, config['style_descriptor']['layer'])
 
 		self.rs = np.random.RandomState(seed=1337)
 
@@ -246,7 +256,10 @@ class Model:
 		}
 
 	def do_generator(self, batch, content_decay=False, adversarial=False):
-		img_reconstructed = self.generator(batch['content_code'], batch['class_code'])
+		with torch.no_grad():
+			style_descriptor = self.style_descriptor(batch['img'])
+
+		img_reconstructed = self.generator(batch['content_code'], batch['class_code'], style_descriptor)
 		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
 
 		losses = {
@@ -256,10 +269,10 @@ class Model:
 		if content_decay:
 			losses['content_decay'] = torch.sum(batch['content_code'] ** 2, dim=1).mean()
 
-		if adversarial:
-			img_converted = self.generator(batch['content_code'], batch['target_class_code'])
-			discriminator_fake = self.discriminator(img_converted, batch['target_class_id'])
-			losses['adversarial'] = self.adv_loss(discriminator_fake, 1)
+		# if adversarial:
+		# 	img_converted = self.generator(batch['content_code'], batch['target_class_code'])
+		# 	discriminator_fake = self.discriminator(img_converted, batch['target_class_id'])
+		# 	losses['adversarial'] = self.adv_loss(discriminator_fake, 1)
 
 		return losses
 
@@ -292,13 +305,20 @@ class Model:
 		samples['class_code'] = self.class_embedding(samples['class_id'])
 		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 
+		samples['style_descriptor'] = self.style_descriptor(samples['img'])
+
 		blank = torch.ones_like(samples['img'][0])
 		summary = [torch.cat([blank] + list(samples['img']), dim=2)]
 		for i in range(n_samples):
 			converted_imgs = [samples['img'][i]]
 
 			for j in range(n_samples):
-				converted_img = self.generator(samples['content_code'][[j]], samples['class_code'][[i]])
+				converted_img = self.generator(
+					samples['content_code'][[j]],
+					samples['class_code'][[i]],
+					samples['style_descriptor'][[i]]
+				)
+
 				converted_imgs.append(converted_img[0])
 
 			summary.append(torch.cat(converted_imgs, dim=2))

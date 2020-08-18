@@ -1,11 +1,17 @@
 base_config = dict(
-	content_depth=64,
-	class_depth=512,
+	content_dim=64,
+	class_dim=512,
+	style_dim=64,
 
-	content_std=0,
+	content_std=1,
 
 	perceptual_loss=dict(
 		layers=[2, 7, 12, 21, 30]
+	),
+
+	style_descriptor=dict(
+		layer=21,  # 21
+		dim=2*512  # 512
 	),
 
 	train=dict(
@@ -13,13 +19,13 @@ base_config = dict(
 		n_epochs=1000,
 
 		learning_rate=dict(
-			latent=1e-3,
-			generator=1e-4
+			latent=1e-2,
+			generator=1e-3
 		),
 
 		loss_weights=dict(
 			reconstruction=1,
-			content_decay=0
+			content_decay=0.01
 		)
 	),
 

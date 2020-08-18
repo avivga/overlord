@@ -1,5 +1,4 @@
 import math
-import numpy as np
 
 import torch
 from torch import nn
@@ -10,11 +9,14 @@ from model import ConstantInput, ToRGB, ModulatedConv2d, FusedLeakyReLU
 
 class Generator(nn.Module):
 
-	def __init__(self, size, style_dim, channel_multiplier=2, blur_kernel=[1, 3, 3, 1]):
+	def __init__(self, size, latent_dim, style_descriptor_dim, style_latent_dim):
 		super().__init__()
 
 		self.size = size
-		self.style_dim = style_dim
+		self.latent_dim = latent_dim
+
+		channel_multiplier = 2
+		blur_kernel = [1, 3, 3, 1]
 
 		self.channels = {
 			4: 512,
@@ -29,8 +31,10 @@ class Generator(nn.Module):
 		}
 
 		self.input = ConstantInput(self.channels[4])
-		self.conv1 = StyledConv(self.channels[4], self.channels[4], 3, style_dim, blur_kernel=blur_kernel)
-		self.to_rgb1 = ToRGB(self.channels[4], style_dim, upsample=False)
+		self.conv1 = StyledConv(self.channels[4], self.channels[4], 3, latent_dim, blur_kernel=blur_kernel)
+		self.to_rgb1 = ToRGB(self.channels[4], latent_dim, upsample=False)
+
+		self.style_projector = nn.Linear(in_features=style_descriptor_dim, out_features=style_latent_dim)
 
 		self.log_size = int(math.log(size, 2))
 		self.num_layers = (self.log_size - 2) * 2 + 1
@@ -50,34 +54,35 @@ class Generator(nn.Module):
 					in_channel,
 					out_channel,
 					3,
-					style_dim,
+					latent_dim,
 					upsample=True,
 					blur_kernel=blur_kernel,
 				)
 			)
 
-			self.convs.append(StyledConv(out_channel, out_channel, 3, style_dim, blur_kernel=blur_kernel))
-			self.to_rgbs.append(ToRGB(out_channel, style_dim))
+			self.convs.append(StyledConv(out_channel, out_channel, 3, latent_dim, blur_kernel=blur_kernel))
+			self.to_rgbs.append(ToRGB(out_channel, latent_dim))
 
 			in_channel = out_channel
 
 		self.n_latent = self.log_size * 2 - 2
 
-	def forward(self, content_codes, class_codes):
-		styles = torch.cat((content_codes, class_codes), dim=1)
-		latent = styles.unsqueeze(dim=1).repeat(1, self.n_latent, 1)
-		# latent = styles.view((-1, self.n_latent, 512))
+	def forward(self, content_code, class_code, style_descriptor):
+		style_code = self.style_projector(style_descriptor)
 
-		out = self.input(latent)
-		out = self.conv1(out, latent[:, 0])
+		latent_code = torch.cat((content_code, class_code, style_code), dim=1)
+		latent_code = latent_code.unsqueeze(dim=1).repeat(1, self.n_latent, 1)
 
-		skip = self.to_rgb1(out, latent[:, 1])
+		out = self.input(latent_code)
+		out = self.conv1(out, latent_code[:, 0])
+
+		skip = self.to_rgb1(out, latent_code[:, 1])
 
 		i = 1
 		for conv1, conv2, to_rgb in zip(self.convs[::2], self.convs[1::2], self.to_rgbs):
-			out = conv1(out, latent[:, i])
-			out = conv2(out, latent[:, i + 1])
-			skip = to_rgb(out, latent[:, i + 2], skip)
+			out = conv1(out, latent_code[:, i])
+			out = conv2(out, latent_code[:, i + 1])
+			skip = to_rgb(out, latent_code[:, i + 2], skip)
 
 			i += 2
 
@@ -162,20 +167,20 @@ class StyledConv(nn.Module):
 # 		return out
 
 
-class NetVGGFeatures(nn.Module):
+class VGGFeatures(nn.Module):
 
-	def __init__(self, layer_ids):
+	def __init__(self):
 		super().__init__()
 
-		self.vggnet = models.vgg16(pretrained=True)
-		self.layer_ids = layer_ids
+		self.vgg = models.vgg16(pretrained=True)
 
-	def forward(self, x):
+	def forward(self, x, layer_ids):
 		output = []
-		for i in range(self.layer_ids[-1] + 1):
-			x = self.vggnet.features[i](x)
 
-			if i in self.layer_ids:
+		for i in range(layer_ids[-1] + 1):
+			x = self.vgg.features[i](x)
+
+			if i in layer_ids:
 				output.append(x)
 
 		return output
@@ -183,21 +188,39 @@ class NetVGGFeatures(nn.Module):
 
 class VGGDistance(nn.Module):
 
-	def __init__(self, layer_ids):
+	def __init__(self, vgg_features, layer_ids):
 		super().__init__()
 
-		self.vgg = NetVGGFeatures(layer_ids)
+		self.vgg_features = vgg_features
 		self.layer_ids = layer_ids
 
 	def forward(self, I1, I2):
-		b_sz = I1.size(0)
-		f1 = self.vgg(I1)
-		f2 = self.vgg(I2)
+		batch_size = I1.size(0)
 
-		loss = torch.abs(I1 - I2).view(b_sz, -1).mean(1)
+		f1 = self.vgg_features(I1, self.layer_ids)
+		f2 = self.vgg_features(I2, self.layer_ids)
+
+		loss = torch.abs(I1 - I2).view(batch_size, -1).mean(dim=1)
 
 		for i in range(len(self.layer_ids)):
-			layer_loss = torch.abs(f1[i] - f2[i]).view(b_sz, -1).mean(1)
+			layer_loss = torch.abs(f1[i] - f2[i]).view(batch_size, -1).mean(dim=1)
 			loss = loss + layer_loss
 
 		return loss.mean()
+
+
+class VGGStyle(nn.Module):
+
+	def __init__(self, vgg_features, layer_id):
+		super().__init__()
+
+		self.vgg_features = vgg_features
+		self.layer_id = layer_id
+
+	def forward(self, x):
+		features = self.vgg_features(x, [self.layer_id])[0]
+
+		means = torch.mean(features, dim=[2, 3])
+		stds = torch.std(features, dim=[2, 3])
+
+		return torch.cat((means, stds), dim=1)
