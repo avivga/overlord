@@ -1,23 +1,6 @@
-from torch import nn
+import torch
 from torch.utils.data.dataset import Dataset
-
-
-class AverageMeter:
-
-	def __init__(self):
-		self.reset()
-
-	def reset(self):
-		self.val = 0
-		self.avg = 0
-		self.sum = 0
-		self.count = 0
-
-	def update(self, val, n=1):
-		self.val = val
-		self.sum += val * n
-		self.count += n
-		self.avg = self.sum / self.count
+from torchvision import transforms
 
 
 class NamedTensorDataset(Dataset):
@@ -32,17 +15,27 @@ class NamedTensorDataset(Dataset):
 	def __len__(self):
 		return list(self.named_tensors.values())[0].size(0)
 
-	def subset(self, indices):
-		return NamedTensorDataset(self[indices])
 
+class AugmentedDataset(NamedTensorDataset):
 
-def he_init(module):
-	if isinstance(module, nn.Conv2d):
-		nn.init.kaiming_normal_(module.weight, mode='fan_in', nonlinearity='relu')
-		if module.bias is not None:
-			nn.init.constant_(module.bias, 0)
+	def __init__(self, named_tensors):
+		super().__init__(named_tensors)
 
-	if isinstance(module, nn.Linear):
-		nn.init.kaiming_normal_(module.weight, mode='fan_in', nonlinearity='relu')
-		if module.bias is not None:
-			nn.init.constant_(module.bias, 0)
+		self.__transform = transforms.Compose([
+			transforms.ToPILImage(),
+			transforms.RandomResizedCrop(tuple(self.named_tensors['img'].shape[2:4]), scale=[0.6, 1.0], ratio=[1.0, 1.0]),
+			transforms.RandomHorizontalFlip(),
+			transforms.ToTensor()
+		])
+
+	def __getitem__(self, index):
+		item = super().__getitem__(index)
+
+		if isinstance(index, int):
+			item['img_augmented'] = self.__transform(item['img'])
+		else:
+			item['img_augmented'] = torch.zeros_like(item['img'])
+			for i in range(item['img'].shape[0]):
+				item['img_augmented'][i] = self.__transform(item['img'][i])
+
+		return item

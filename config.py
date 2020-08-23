@@ -10,8 +10,8 @@ base_config = dict(
 	),
 
 	style_descriptor=dict(
-		layer=21,  # 21
-		dim=2*512  # 512
+		layer=7,  # 21
+		dim=2*128  # 512
 	),
 
 	train=dict(

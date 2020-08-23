@@ -185,12 +185,16 @@ class Edges2Shoes(DataSet):
 		parser = argparse.ArgumentParser()
 		parser.add_argument('-sp', '--split', type=str, choices=['train', 'val'], required=True)
 		parser.add_argument('-is', '--img-size', type=int, default=128)
+		parser.add_argument('-ni', '--n-images', type=int, required=False)
 
 		args = parser.parse_args(extras)
 		self.__dict__.update(vars(args))
 
 	def read(self):
 		img_paths = glob.glob(os.path.join(self._base_dir, self.split, '*.jpg'))
+
+		if self.n_images:
+			img_paths = random.sample(img_paths, k=self.n_images)
 
 		edge_imgs = np.empty(shape=(len(img_paths), self.img_size, self.img_size, 3), dtype=np.uint8)
 		shoe_imgs = np.empty(shape=(len(img_paths), self.img_size, self.img_size, 3), dtype=np.uint8)

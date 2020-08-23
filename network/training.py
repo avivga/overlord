@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from network.modules import Generator, VGGFeatures, VGGDistance, VGGStyle
-from network.utils import NamedTensorDataset
+from network.utils import NamedTensorDataset, AugmentedDataset
 
 
 class Model:
@@ -87,7 +87,7 @@ class Model:
 			class_id=torch.from_numpy(classes.astype(np.int64))
 		)
 
-		dataset = NamedTensorDataset(data)
+		dataset = AugmentedDataset(data)
 		data_loader = DataLoader(
 			dataset, batch_size=self.config['train']['batch_size'],
 			shuffle=True, pin_memory=True, drop_last=False
@@ -257,7 +257,7 @@ class Model:
 
 	def do_generator(self, batch, content_decay=False, adversarial=False):
 		with torch.no_grad():
-			style_descriptor = self.style_descriptor(batch['img'])
+			style_descriptor = self.style_descriptor(batch['img_augmented'])
 
 		img_reconstructed = self.generator(batch['content_code'], batch['class_code'], style_descriptor)
 		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
