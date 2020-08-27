@@ -46,7 +46,7 @@ def train(args):
 	model.train(imgs, classes, model_dir, tensorboard_dir)
 
 
-def gan(args):
+def amortize(args):
 	assets = AssetManager(args.base_dir)
 	model_dir = assets.get_model_dir(args.model_name)
 	tensorboard_dir = assets.get_tensorboard_dir(args.model_name)
@@ -62,10 +62,16 @@ def gan(args):
 	class_index[unique_classes] = np.arange(unique_classes.size)
 	classes = class_index[classes]
 
-	model = Model.load(os.path.join(model_dir, args.checkpoint_id))
-	model.config.update(base_config)
+	amortized_model_dir = os.path.join(model_dir, 'amortized')
+	if not os.path.exists(amortized_model_dir):
+		os.mkdir(amortized_model_dir)
 
-	model.gan(imgs, classes, model_dir, tensorboard_dir)
+	amortized_tensorboard_dir = os.path.join(tensorboard_dir, 'amortized')
+	if not os.path.exists(amortized_tensorboard_dir):
+		os.mkdir(amortized_tensorboard_dir)
+
+	model = Model.load(model_dir)
+	model.amortize(imgs, classes, amortized_model_dir, amortized_tensorboard_dir)
 
 
 def main():
@@ -86,11 +92,10 @@ def main():
 	train_parser.add_argument('-mn', '--model-name', type=str, required=True)
 	train_parser.set_defaults(func=train)
 
-	gan_parser = action_parsers.add_parser('gan')
-	gan_parser.add_argument('-dn', '--data-name', type=str, required=True)
-	gan_parser.add_argument('-mn', '--model-name', type=str, required=True)
-	gan_parser.add_argument('-cid', '--checkpoint-id', type=str, required=True)
-	gan_parser.set_defaults(func=gan)
+	amortize_parser = action_parsers.add_parser('amortize')
+	amortize_parser.add_argument('-dn', '--data-name', type=str, required=True)
+	amortize_parser.add_argument('-mn', '--model-name', type=str, required=True)
+	amortize_parser.set_defaults(func=amortize)
 
 	args, extras = parser.parse_known_args()
 	if len(extras) == 0:

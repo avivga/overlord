@@ -29,7 +29,7 @@ base_config = dict(
 		)
 	),
 
-	gan=dict(
+	amortize=dict(
 		batch_size=8,
 		n_epochs=1000,
 
@@ -41,8 +41,7 @@ base_config = dict(
 		loss_weights=dict(
 			reconstruction=1,
 			latent=10,
-			adversarial=1,
-			gradient_penalty=1
+			adversarial=1
 		)
 	)
 )

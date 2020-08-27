@@ -35,22 +35,23 @@ class Model:
 		nn.init.uniform_(self.class_embedding.weight, a=-0.05, b=0.05)
 
 		self.generator = Generator(
-			size=config['img_shape'][0],
-			latent_dim=config['content_dim'] + config['class_dim'] + config['style_dim'],
-			style_descriptor_dim=config['style_descriptor']['dim'],
-			style_latent_dim=config['style_dim']
+			img_size=config['img_shape'][0],
+			content_dim=config['content_dim'],
+			class_dim=config['class_dim'],
+			style_dim=config['style_dim'],
+			style_descriptor_dim=config['style_descriptor']['dim']
 		)
 
 		self.generator.to(self.device)
+
+		self.discriminator = Discriminator(img_size=config['img_shape'][0], n_classes=config['n_classes'])
+		self.discriminator.to(self.device)
 
 		self.content_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['content_dim'])
 		self.content_encoder.to(self.device)
 
 		self.class_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['class_dim'])
 		self.class_encoder.to(self.device)
-
-		self.discriminator = Discriminator(img_size=config['img_shape'][0], n_classes=config['n_classes'])
-		self.discriminator.to(self.device)
 
 		vgg_features = VGGFeatures()
 		vgg_features.to(self.device)
@@ -66,15 +67,20 @@ class Model:
 			config = pickle.load(config_fd)
 
 		model = Model(config)
+
 		model.content_embedding.load_state_dict(torch.load(os.path.join(model_dir, 'content_embedding.pth')))
 		model.class_embedding.load_state_dict(torch.load(os.path.join(model_dir, 'class_embedding.pth')))
+
 		model.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
-		# model.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
+		model.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
+
+		model.content_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'content_encoder.pth')))
+		model.class_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'class_encoder.pth')))
 
 		return model
 
 	def save(self, model_dir, epoch=None):
-		checkpoint_dir = os.path.join(model_dir, '{:08d}'.format(epoch) if epoch is not None else 'current')
+		checkpoint_dir = os.path.join(model_dir, '{:08d}'.format(epoch)) if epoch is not None else model_dir
 		if not os.path.exists(checkpoint_dir):
 			os.mkdir(checkpoint_dir)
 
@@ -83,8 +89,12 @@ class Model:
 
 		torch.save(self.content_embedding.state_dict(), os.path.join(checkpoint_dir, 'content_embedding.pth'))
 		torch.save(self.class_embedding.state_dict(), os.path.join(checkpoint_dir, 'class_embedding.pth'))
+
 		torch.save(self.generator.state_dict(), os.path.join(checkpoint_dir, 'generator.pth'))
-		# torch.save(self.discriminator.state_dict(), os.path.join(checkpoint_dir, 'discriminator.pth'))
+		torch.save(self.discriminator.state_dict(), os.path.join(checkpoint_dir, 'discriminator.pth'))
+
+		torch.save(self.content_encoder.state_dict(), os.path.join(checkpoint_dir, 'content_encoder.pth'))
+		torch.save(self.class_encoder.state_dict(), os.path.join(checkpoint_dir, 'class_encoder.pth'))
 
 	def train(self, imgs, classes, model_dir, tensorboard_dir):
 		data = dict(
@@ -159,7 +169,7 @@ class Model:
 
 		summary.close()
 
-	def gan(self, imgs, classes, model_dir, tensorboard_dir):
+	def amortize(self, imgs, classes, model_dir, tensorboard_dir):
 		data = dict(
 			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
 			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
@@ -173,7 +183,7 @@ class Model:
 
 		dataset = AugmentedDataset(data)
 		data_loader = DataLoader(
-			dataset, batch_size=self.config['gan']['batch_size'],
+			dataset, batch_size=self.config['amortize']['batch_size'],
 			shuffle=True, pin_memory=True, drop_last=False
 		)
 
@@ -184,18 +194,18 @@ class Model:
 				self.generator.parameters()
 			),
 
-			lr=self.config['gan']['learning_rate']['generator'],
+			lr=self.config['amortize']['learning_rate']['generator'],
 			betas=(0.5, 0.999)
 		)
 
 		discriminator_optimizer = Adam(
 			params=self.discriminator.parameters(),
-			lr=self.config['gan']['learning_rate']['discriminator'],
+			lr=self.config['amortize']['learning_rate']['discriminator'],
 			betas=(0.5, 0.999)
 		)
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
-		for epoch in range(self.config['gan']['n_epochs']):
+		for epoch in range(self.config['amortize']['n_epochs']):
 			self.content_encoder.train()
 			self.class_encoder.train()
 			self.generator.train()
@@ -217,7 +227,7 @@ class Model:
 				loss_discriminator = (
 					losses_discriminator['fake']
 					+ losses_discriminator['real']
-					+ self.config['gan']['loss_weights']['gradient_penalty'] * losses_discriminator['gradient_penalty']
+					+ losses_discriminator['gradient_penalty']
 				)
 
 				generator_optimizer.zero_grad()
@@ -228,7 +238,7 @@ class Model:
 				losses_generator = self.train_amortized_generator(batch)
 				loss_generator = 0
 				for term, loss in losses_generator.items():
-					loss_generator += self.config['gan']['loss_weights'][term] * loss
+					loss_generator += self.config['amortize']['loss_weights'][term] * loss
 
 				generator_optimizer.zero_grad()
 				discriminator_optimizer.zero_grad()
@@ -240,25 +250,25 @@ class Model:
 
 			pbar.close()
 
-			summary.add_scalar(tag='gan_loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
-			summary.add_scalar(tag='gan_loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
+			summary.add_scalar(tag='loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
+			summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
 
 			for term, loss in losses_generator.items():
-				summary.add_scalar(tag='gan_loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
+				summary.add_scalar(tag='loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
 
 			samples_fixed = self.generate_samples(dataset, randomized=False, amortized=True)
 			samples_random = self.generate_samples(dataset, randomized=True, amortized=True)
 
-			summary.add_image(tag='gan/samples-fixed', img_tensor=samples_fixed, global_step=epoch)
-			summary.add_image(tag='gan/samples-random', img_tensor=samples_random, global_step=epoch)
+			summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=epoch)
+			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
 
 			if epoch % 10 == 0:
 				content_codes = self.extract_codes(dataset, amortized=True)
 				score_train, score_test = self.classification_score(X=content_codes, y=classes)
-				summary.add_scalar(tag='gan/class_from_content/train', scalar_value=score_train, global_step=epoch)
-				summary.add_scalar(tag='gan/class_from_content/test', scalar_value=score_test, global_step=epoch)
+				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
 
-		# self.save(model_dir)
+			self.save(model_dir)
 
 		summary.close()
 
@@ -380,21 +390,6 @@ class Model:
 		summary = torch.cat(summary, dim=1)
 		return summary.clamp(min=0, max=1)
 
-	@staticmethod
-	def classification_score(X, y):
-		scaler = StandardScaler()
-		X = scaler.fit_transform(X)
-
-		X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-
-		classifier = LogisticRegression(random_state=0)
-		classifier.fit(X_train, y_train)
-
-		acc_train = classifier.score(X_train, y_train)
-		acc_test = classifier.score(X_test, y_test)
-
-		return acc_train, acc_test
-
 	@torch.no_grad()
 	def extract_codes(self, dataset, amortized=False):
 		data_loader = DataLoader(dataset, batch_size=32, shuffle=False, pin_memory=True, drop_last=False)
@@ -410,3 +405,18 @@ class Model:
 
 		content_codes = np.concatenate(content_codes, axis=0)
 		return content_codes
+
+	@staticmethod
+	def classification_score(X, y):
+		scaler = StandardScaler()
+		X = scaler.fit_transform(X)
+
+		X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+		classifier = LogisticRegression(random_state=0)
+		classifier.fit(X_train, y_train)
+
+		acc_train = classifier.score(X_train, y_train)
+		acc_test = classifier.score(X_test, y_test)
+
+		return acc_train, acc_test

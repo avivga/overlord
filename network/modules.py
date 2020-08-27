@@ -6,16 +6,16 @@ from torch import nn
 from torch.nn import functional as F
 from torchvision import models
 
-from model import ConstantInput, ToRGB, ModulatedConv2d, FusedLeakyReLU, ScaledLeakyReLU, EqualConv2d, Blur
+# stylegan2 modules
+from model import ConstantInput, ToRGB, ModulatedConv2d, FusedLeakyReLU
 
 
 class Generator(nn.Module):
 
-	def __init__(self, size, latent_dim, style_descriptor_dim, style_latent_dim):
+	def __init__(self, img_size, content_dim, class_dim, style_dim, style_descriptor_dim):
 		super().__init__()
 
-		self.size = size
-		self.latent_dim = latent_dim
+		latent_dim = content_dim + class_dim + style_dim
 
 		channel_multiplier = 2
 		blur_kernel = [1, 3, 3, 1]
@@ -36,9 +36,9 @@ class Generator(nn.Module):
 		self.conv1 = StyledConv(self.channels[4], self.channels[4], 3, latent_dim, blur_kernel=blur_kernel)
 		self.to_rgb1 = ToRGB(self.channels[4], latent_dim, upsample=False)
 
-		self.style_projector = nn.Linear(in_features=style_descriptor_dim, out_features=style_latent_dim)
+		self.style_projector = nn.Linear(in_features=style_descriptor_dim, out_features=style_dim)
 
-		self.log_size = int(math.log(size, 2))
+		self.log_size = int(math.log(img_size, 2))
 		self.num_layers = (self.log_size - 2) * 2 + 1
 
 		self.convs = nn.ModuleList()
@@ -53,16 +53,20 @@ class Generator(nn.Module):
 
 			self.convs.append(
 				StyledConv(
-					in_channel,
-					out_channel,
-					3,
-					latent_dim,
-					upsample=True,
-					blur_kernel=blur_kernel,
+					in_channel, out_channel,
+					kernel_size=3, style_dim=latent_dim,
+					upsample=True, blur_kernel=blur_kernel
 				)
 			)
 
-			self.convs.append(StyledConv(out_channel, out_channel, 3, latent_dim, blur_kernel=blur_kernel))
+			self.convs.append(
+				StyledConv(
+					out_channel, out_channel,
+					kernel_size=3, style_dim=latent_dim,
+					upsample=False, blur_kernel=blur_kernel
+				)
+			)
+
 			self.to_rgbs.append(ToRGB(out_channel, latent_dim))
 
 			in_channel = out_channel
@@ -92,17 +96,63 @@ class Generator(nn.Module):
 		return image
 
 
+class Encoder(nn.Module):
+
+	def __init__(self, img_size, code_dim, dim_in=64, max_conv_dim=256):
+		super().__init__()
+
+		blocks = []
+		blocks += [nn.Conv2d(in_channels=3, out_channels=dim_in, kernel_size=3, stride=1, padding=1)]
+
+		repeat_num = int(np.log2(img_size)) - 2
+		for _ in range(repeat_num):
+			dim_out = min(dim_in*2, max_conv_dim)
+			blocks += [ResBlk(dim_in, dim_out, downsample=True)]
+			dim_in = dim_out
+
+		blocks += [nn.LeakyReLU(0.2)]
+		blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
+		blocks += [nn.LeakyReLU(0.2)]
+		blocks += [nn.Conv2d(dim_out, code_dim, 1, 1, 0)]
+
+		self.main = nn.Sequential(*blocks)
+
+	def forward(self, img):
+		return torch.squeeze(self.main(img))
+
+
+class Discriminator(nn.Module):
+
+	def __init__(self, img_size, n_classes, max_conv_dim=256):
+		super().__init__()
+
+		dim_in = 2**14 // img_size
+		blocks = []
+		blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
+
+		repeat_num = int(np.log2(img_size)) - 2
+		for _ in range(repeat_num):
+			dim_out = min(dim_in*2, max_conv_dim)
+			blocks += [ResBlk(dim_in, dim_out, downsample=True)]
+			dim_in = dim_out
+
+		blocks += [nn.LeakyReLU(0.2)]
+		blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
+		blocks += [nn.LeakyReLU(0.2)]
+		blocks += [nn.Conv2d(dim_out, n_classes, 1, 1, 0)]
+		self.main = nn.Sequential(*blocks)
+
+	def forward(self, x, y):
+		out = self.main(x)
+		out = out.view(out.size(0), -1)  # (batch, num_domains)
+		idx = torch.LongTensor(range(y.size(0))).to(y.device)
+		out = out[idx, y]  # (batch)
+		return out
+
+
 class StyledConv(nn.Module):
-	def __init__(
-			self,
-			in_channel,
-			out_channel,
-			kernel_size,
-			style_dim,
-			upsample=False,
-			blur_kernel=[1, 3, 3, 1],
-			demodulate=True,
-	):
+
+	def __init__(self, in_channel, out_channel, kernel_size, style_dim, upsample=False, blur_kernel=[1, 3, 3, 1], demodulate=True):
 		super().__init__()
 
 		self.conv = ModulatedConv2d(
@@ -172,62 +222,6 @@ class ResBlk(nn.Module):
 	def forward(self, x):
 		x = self._shortcut(x) + self._residual(x)
 		return x / math.sqrt(2)  # unit variance
-
-
-class Encoder(nn.Module):
-
-	def __init__(self, img_size, code_dim, max_conv_dim=256):
-		super().__init__()
-
-		dim_in = 64
-
-		blocks = []
-		blocks += [nn.Conv2d(in_channels=3, out_channels=dim_in, kernel_size=3, stride=1, padding=1)]
-
-		repeat_num = int(np.log2(img_size)) - 2
-		for _ in range(repeat_num):
-			dim_out = min(dim_in*2, max_conv_dim)
-			blocks += [ResBlk(dim_in, dim_out, downsample=True)]
-			dim_in = dim_out
-
-		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
-		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, code_dim, 1, 1, 0)]
-
-		self.main = nn.Sequential(*blocks)
-
-	def forward(self, img):
-		return torch.squeeze(self.main(img))
-
-
-class Discriminator(nn.Module):
-
-	def __init__(self, img_size, n_classes, max_conv_dim=256):
-		super().__init__()
-
-		dim_in = 2**14 // img_size
-		blocks = []
-		blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
-
-		repeat_num = int(np.log2(img_size)) - 2
-		for _ in range(repeat_num):
-			dim_out = min(dim_in*2, max_conv_dim)
-			blocks += [ResBlk(dim_in, dim_out, downsample=True)]
-			dim_in = dim_out
-
-		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
-		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, n_classes, 1, 1, 0)]
-		self.main = nn.Sequential(*blocks)
-
-	def forward(self, x, y):
-		out = self.main(x)
-		out = out.view(out.size(0), -1)  # (batch, num_domains)
-		idx = torch.LongTensor(range(y.size(0))).to(y.device)
-		out = out[idx, y]  # (batch)
-		return out
 
 
 class VGGFeatures(nn.Module):
