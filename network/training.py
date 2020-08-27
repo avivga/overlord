@@ -42,22 +42,13 @@ class Model:
 			style_descriptor_dim=config['style_descriptor']['dim']
 		)
 
-		self.generator.to(self.device)
-
 		self.discriminator = Discriminator(img_size=config['img_shape'][0], n_classes=config['n_classes'])
-		self.discriminator.to(self.device)
-
 		self.content_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['content_dim'])
-		self.content_encoder.to(self.device)
-
 		self.class_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['class_dim'])
-		self.class_encoder.to(self.device)
 
-		vgg_features = VGGFeatures()
-		vgg_features.to(self.device)
-
-		self.perceptual_loss = VGGDistance(vgg_features, config['perceptual_loss']['layers'])
-		self.style_descriptor = VGGStyle(vgg_features, config['style_descriptor']['layer'])
+		self.vgg_features = VGGFeatures()
+		self.perceptual_loss = VGGDistance(self.vgg_features, config['perceptual_loss']['layers'])
+		self.style_descriptor = VGGStyle(self.vgg_features, config['style_descriptor']['layer'])
 
 		self.rs = np.random.RandomState(seed=1337)
 
@@ -123,6 +114,9 @@ class Model:
 				'lr': self.config['train']['learning_rate']['generator']
 			}
 		], betas=(0.5, 0.999))
+
+		self.generator.to(self.device)
+		self.vgg_features.to(self.device)
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['train']['n_epochs']):
@@ -204,12 +198,18 @@ class Model:
 			betas=(0.5, 0.999)
 		)
 
+		self.generator.to(self.device)
+		self.discriminator.to(self.device)
+		self.content_encoder.to(self.device)
+		self.class_encoder.to(self.device)
+		self.vgg_features.to(self.device)
+
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['amortize']['n_epochs']):
-			self.content_encoder.train()
-			self.class_encoder.train()
 			self.generator.train()
 			self.discriminator.train()
+			self.content_encoder.train()
+			self.class_encoder.train()
 
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
