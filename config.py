@@ -30,7 +30,7 @@ base_config = dict(
 	),
 
 	gan=dict(
-		batch_size=16,
+		batch_size=8,
 		n_epochs=1000,
 
 		learning_rate=dict(
@@ -40,7 +40,7 @@ base_config = dict(
 
 		loss_weights=dict(
 			reconstruction=1,
-			content_decay=0,
+			latent=10,
 			adversarial=1,
 			gradient_penalty=1
 		)

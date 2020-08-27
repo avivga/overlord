@@ -16,8 +16,8 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from network.modules import Generator, VGGFeatures, VGGDistance, VGGStyle
-from network.utils import NamedTensorDataset, AugmentedDataset
+from network.modules import Generator, Encoder, Discriminator, VGGFeatures, VGGDistance, VGGStyle
+from network.utils import AugmentedDataset
 
 
 class Model:
@@ -43,8 +43,14 @@ class Model:
 
 		self.generator.to(self.device)
 
-		# self.discriminator = Discriminator(self.config)
-		# self.discriminator.to(self.device)
+		self.content_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['content_dim'])
+		self.content_encoder.to(self.device)
+
+		self.class_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['class_dim'])
+		self.class_encoder.to(self.device)
+
+		self.discriminator = Discriminator(img_size=config['img_shape'][0], n_classes=config['n_classes'])
+		self.discriminator.to(self.device)
 
 		vgg_features = VGGFeatures()
 		vgg_features.to(self.device)
@@ -118,7 +124,7 @@ class Model:
 				batch['class_code'] = self.class_embedding(batch['class_id'])
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
-				losses_generator = self.do_generator(batch, content_decay=True, adversarial=False)
+				losses_generator = self.train_latent_generator(batch)
 				loss_generator = 0
 				for term, loss in losses_generator.items():
 					loss_generator += self.config['train']['loss_weights'][term] * loss
@@ -160,14 +166,24 @@ class Model:
 			class_id=torch.from_numpy(classes.astype(np.int64))
 		)
 
-		dataset = NamedTensorDataset(data)
+		class_img_ids = {
+			class_id: np.where(classes == class_id)[0]
+			for class_id in np.unique(classes)
+		}
+
+		dataset = AugmentedDataset(data)
 		data_loader = DataLoader(
 			dataset, batch_size=self.config['gan']['batch_size'],
 			shuffle=True, pin_memory=True, drop_last=False
 		)
 
 		generator_optimizer = Adam(
-			params=self.generator.parameters(),
+			params=itertools.chain(
+				self.content_encoder.parameters(),
+				self.class_encoder.parameters(),
+				self.generator.parameters()
+			),
+
 			lr=self.config['gan']['learning_rate']['generator'],
 			betas=(0.5, 0.999)
 		)
@@ -180,6 +196,8 @@ class Model:
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['gan']['n_epochs']):
+			self.content_encoder.train()
+			self.class_encoder.train()
 			self.generator.train()
 			self.discriminator.train()
 
@@ -188,13 +206,14 @@ class Model:
 				target_class_ids = np.random.choice(self.config['n_classes'], size=batch['img_id'].shape[0])
 				batch['target_class_id'] = torch.from_numpy(target_class_ids)
 
+				target_class_img_ids = np.array([np.random.choice(class_img_ids[class_id]) for class_id in target_class_ids])
+				batch['target_class_img'] = data['img'][target_class_img_ids]
+
 				batch['content_code'] = self.content_embedding(batch['img_id'])
 				batch['class_code'] = self.class_embedding(batch['class_id'])
-				batch['target_class_code'] = self.class_embedding(batch['target_class_id'])
-
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
-				losses_discriminator = self.do_discriminator(batch)
+				losses_discriminator = self.train_discriminator(batch)
 				loss_discriminator = (
 					losses_discriminator['fake']
 					+ losses_discriminator['real']
@@ -206,7 +225,7 @@ class Model:
 				loss_discriminator.backward()
 				discriminator_optimizer.step()
 
-				losses_generator = self.do_generator(batch, content_decay=False, adversarial=True)
+				losses_generator = self.train_amortized_generator(batch)
 				loss_generator = 0
 				for term, loss in losses_generator.items():
 					loss_generator += self.config['gan']['loss_weights'][term] * loss
@@ -227,19 +246,68 @@ class Model:
 			for term, loss in losses_generator.items():
 				summary.add_scalar(tag='gan_loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
 
-			samples_fixed = self.generate_samples(dataset, randomized=False)
-			samples_random = self.generate_samples(dataset, randomized=True)
+			samples_fixed = self.generate_samples(dataset, randomized=False, amortized=True)
+			samples_random = self.generate_samples(dataset, randomized=True, amortized=True)
 
 			summary.add_image(tag='gan/samples-fixed', img_tensor=samples_fixed, global_step=epoch)
 			summary.add_image(tag='gan/samples-random', img_tensor=samples_random, global_step=epoch)
 
-			self.save(model_dir)
+			if epoch % 10 == 0:
+				content_codes = self.extract_codes(dataset, amortized=True)
+				score_train, score_test = self.classification_score(X=content_codes, y=classes)
+				summary.add_scalar(tag='gan/class_from_content/train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='gan/class_from_content/test', scalar_value=score_test, global_step=epoch)
+
+		# self.save(model_dir)
 
 		summary.close()
 
-	def do_discriminator(self, batch):
+	def train_latent_generator(self, batch):
 		with torch.no_grad():
-			img_converted = self.generator(batch['content_code'], batch['target_class_code'])
+			style_descriptor = self.style_descriptor(batch['img_augmented'])
+
+		img_reconstructed = self.generator(batch['content_code'], batch['class_code'], style_descriptor)
+		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
+
+		loss_content_decay = torch.sum(batch['content_code'] ** 2, dim=1).mean()
+
+		return {
+			'reconstruction': loss_reconstruction,
+			'content_decay': loss_content_decay
+		}
+
+	def train_amortized_generator(self, batch):
+		with torch.no_grad():
+			style_descriptor = self.style_descriptor(batch['img'])
+
+		content_code = self.content_encoder(batch['img'])
+		class_code = self.class_encoder(batch['img'])
+		img_reconstructed = self.generator(content_code, class_code, style_descriptor)
+		loss_reconstruction = torch.mean(torch.abs(img_reconstructed - batch['img']))
+
+		loss_content = torch.mean((content_code - batch['content_code']) ** 2, dim=1).mean()
+		loss_class = torch.mean((class_code - batch['class_code']) ** 2, dim=1).mean()
+
+		with torch.no_grad():
+			target_style_descriptor = self.style_descriptor(batch['target_class_img'])
+
+		target_class_code = self.class_encoder(batch['target_class_img'])
+		img_converted = self.generator(content_code, target_class_code, target_style_descriptor)
+		discriminator_fake = self.discriminator(img_converted, batch['target_class_id'])
+		loss_adversarial = self.adv_loss(discriminator_fake, 1)
+
+		return {
+			'reconstruction': loss_reconstruction,
+			'latent': loss_content + loss_class,
+			'adversarial': loss_adversarial
+		}
+
+	def train_discriminator(self, batch):
+		with torch.no_grad():
+			content_code = self.content_encoder(batch['img'])
+			target_class_code = self.class_encoder(batch['target_class_img'])
+			target_style_descriptor = self.style_descriptor(batch['target_class_img'])
+			img_converted = self.generator(content_code, target_class_code, target_style_descriptor)
 
 		batch['img'].requires_grad_()  # for gradient penalty
 		discriminator_fake = self.discriminator(img_converted, batch['target_class_id'])
@@ -254,27 +322,6 @@ class Model:
 			'real': loss_real,
 			'gradient_penalty': loss_gp
 		}
-
-	def do_generator(self, batch, content_decay=False, adversarial=False):
-		with torch.no_grad():
-			style_descriptor = self.style_descriptor(batch['img_augmented'])
-
-		img_reconstructed = self.generator(batch['content_code'], batch['class_code'], style_descriptor)
-		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
-
-		losses = {
-			'reconstruction': loss_reconstruction
-		}
-
-		if content_decay:
-			losses['content_decay'] = torch.sum(batch['content_code'] ** 2, dim=1).mean()
-
-		# if adversarial:
-		# 	img_converted = self.generator(batch['content_code'], batch['target_class_code'])
-		# 	discriminator_fake = self.discriminator(img_converted, batch['target_class_id'])
-		# 	losses['adversarial'] = self.adv_loss(discriminator_fake, 1)
-
-		return losses
 
 	def adv_loss(self, logits, target):
 		assert target in [1, 0]
@@ -294,17 +341,24 @@ class Model:
 		return reg
 
 	@torch.no_grad()
-	def generate_samples(self, dataset, n_samples=10, randomized=False):
+	def generate_samples(self, dataset, n_samples=10, randomized=False, amortized=False):
+		self.content_encoder.eval()
+		self.class_encoder.eval()
 		self.generator.eval()
 
 		random = self.rs if randomized else np.random.RandomState(seed=0)
 		img_idx = torch.from_numpy(random.choice(len(dataset), size=n_samples, replace=False))
-
 		samples = dataset[img_idx]
-		samples['content_code'] = self.content_embedding(samples['img_id'])
-		samples['class_code'] = self.class_embedding(samples['class_id'])
-		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 
+		if amortized:
+			samples['content_code'] = self.content_encoder(samples['img'].to(self.device))
+			samples['class_code'] = self.class_encoder(samples['img'].to(self.device))
+
+		else:
+			samples['content_code'] = self.content_embedding(samples['img_id'])
+			samples['class_code'] = self.class_embedding(samples['class_id'])
+
+		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 		samples['style_descriptor'] = self.style_descriptor(samples['img'])
 
 		blank = torch.ones_like(samples['img'][0])
@@ -342,13 +396,17 @@ class Model:
 		return acc_train, acc_test
 
 	@torch.no_grad()
-	def extract_codes(self, dataset):
-		data_loader = DataLoader(dataset, batch_size=128, shuffle=False, pin_memory=True, drop_last=False)
+	def extract_codes(self, dataset, amortized=False):
+		data_loader = DataLoader(dataset, batch_size=32, shuffle=False, pin_memory=True, drop_last=False)
 
 		content_codes = []
 		for batch in data_loader:
-			batch_content_codes = self.content_embedding(batch['img_id']).view((batch['img_id'].shape[0], -1))
-			content_codes.append(batch_content_codes.numpy())
+			if amortized:
+				batch_content_codes = self.content_encoder(batch['img'].to(self.device))
+			else:
+				batch_content_codes = self.content_embedding(batch['img_id'])
+
+			content_codes.append(batch_content_codes.cpu().numpy())
 
 		content_codes = np.concatenate(content_codes, axis=0)
 		return content_codes
