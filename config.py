@@ -16,11 +16,12 @@ base_config = dict(
 
 	train=dict(
 		batch_size=32,
-		n_epochs=1000,
+		n_epochs=500,
 
 		learning_rate=dict(
 			latent=1e-2,
-			generator=1e-3
+			generator=1e-3,
+			min=1e-5
 		),
 
 		loss_weights=dict(

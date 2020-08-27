@@ -13,6 +13,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.optim import Adam
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -100,7 +101,7 @@ class Model:
 			shuffle=True, pin_memory=True, drop_last=False
 		)
 
-		generator_optimizer = Adam([
+		optimizer = Adam([
 			{
 				'params': itertools.chain(
 					self.content_embedding.parameters(),
@@ -114,6 +115,12 @@ class Model:
 				'lr': self.config['train']['learning_rate']['generator']
 			}
 		], betas=(0.5, 0.999))
+
+		scheduler = CosineAnnealingLR(
+			optimizer,
+			T_max=self.config['train']['n_epochs'] * len(data_loader),
+			eta_min=self.config['train']['learning_rate']['min']
+		)
 
 		self.generator.to(self.device)
 		self.vgg_features.to(self.device)
@@ -133,9 +140,10 @@ class Model:
 				for term, loss in losses_generator.items():
 					loss_generator += self.config['train']['loss_weights'][term] * loss
 
-				generator_optimizer.zero_grad()
+				optimizer.zero_grad()
 				loss_generator.backward()
-				generator_optimizer.step()
+				optimizer.step()
+				scheduler.step()
 
 				pbar.set_description_str('epoch #{}'.format(epoch))
 				pbar.set_postfix(gen_loss=loss_generator.item())
