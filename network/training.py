@@ -276,7 +276,15 @@ class Model:
 		with torch.no_grad():
 			style_descriptor = self.style_descriptor(batch['img_augmented'])
 
-		img_reconstructed = self.generator(batch['content_code'], batch['class_code'], style_descriptor)
+		if self.config['content_std'] != 0:
+			noise = torch.zeros_like(batch['content_code'])
+			noise.normal_(mean=0, std=self.config['content_std'])
+
+			content_code_regularized = batch['content_code'] + noise
+		else:
+			content_code_regularized = batch['content_code']
+
+		img_reconstructed = self.generator(content_code_regularized, batch['class_code'], style_descriptor)
 		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
 
 		loss_content_decay = torch.sum(batch['content_code'] ** 2, dim=1).mean()
