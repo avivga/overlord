@@ -23,6 +23,10 @@ class AssetManager:
 		if not os.path.exists(self.__tensorboard_dir):
 			os.mkdir(self.__tensorboard_dir)
 
+		self.__eval_dir = os.path.join(self.__cache_dir, 'eval')
+		if not os.path.exists(self.__eval_dir):
+			os.mkdir(self.__eval_dir)
+
 	def get_preprocess_file_path(self, data_name):
 		return os.path.join(self.__preprocess_dir, data_name + '.npz')
 
@@ -43,6 +47,15 @@ class AssetManager:
 
 		self.__recreate_dir(tensorboard_dir)
 		return tensorboard_dir
+
+	def get_eval_dir(self, model_name):
+		return os.path.join(self.__eval_dir, model_name)
+
+	def recreate_eval_dir(self, model_name):
+		eval_dir = self.get_eval_dir(model_name)
+
+		self.__recreate_dir(eval_dir)
+		return eval_dir
 
 	@staticmethod
 	def __recreate_dir(path):

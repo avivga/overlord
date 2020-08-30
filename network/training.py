@@ -16,6 +16,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+import torchvision
 
 from network.modules import Generator, Encoder, Discriminator, VGGFeatures, VGGDistance, VGGStyle
 from network.utils import AugmentedDataset
@@ -54,25 +55,24 @@ class Model:
 		self.rs = np.random.RandomState(seed=1337)
 
 	@staticmethod
-	def load(model_dir):
-		with open(os.path.join(model_dir, 'config.pkl'), 'rb') as config_fd:
+	def load(checkpoint_dir):
+		with open(os.path.join(checkpoint_dir, 'config.pkl'), 'rb') as config_fd:
 			config = pickle.load(config_fd)
 
 		model = Model(config)
 
-		model.content_embedding.load_state_dict(torch.load(os.path.join(model_dir, 'content_embedding.pth')))
-		model.class_embedding.load_state_dict(torch.load(os.path.join(model_dir, 'class_embedding.pth')))
+		model.content_embedding.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'content_embedding.pth')))
+		model.class_embedding.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'class_embedding.pth')))
 
-		model.generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
-		model.discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
+		model.generator.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'generator.pth')))
+		model.discriminator.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'discriminator.pth')))
 
-		model.content_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'content_encoder.pth')))
-		model.class_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'class_encoder.pth')))
+		model.content_encoder.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'content_encoder.pth')))
+		model.class_encoder.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'class_encoder.pth')))
 
 		return model
 
-	def save(self, model_dir, epoch=None):
-		checkpoint_dir = os.path.join(model_dir, '{:08d}'.format(epoch)) if epoch is not None else model_dir
+	def save(self, checkpoint_dir):
 		if not os.path.exists(checkpoint_dir):
 			os.mkdir(checkpoint_dir)
 
@@ -279,6 +279,54 @@ class Model:
 			self.save(model_dir)
 
 		summary.close()
+
+	@torch.no_grad()
+	def generate_for_evaluation(self, imgs, classes, n_translations_per_image, out_dir):
+		data = dict(
+			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
+			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
+			class_id=torch.from_numpy(classes.astype(np.int64))
+		)
+
+		unique_classes = np.unique(classes)
+
+		class_img_ids = {
+			class_id: np.where(classes == class_id)[0]
+			for class_id in unique_classes
+		}
+
+		self.content_encoder.eval()
+		self.class_encoder.eval()
+		self.generator.eval()
+
+		self.content_encoder.to(self.device)
+		self.class_encoder.to(self.device)
+		self.generator.to(self.device)
+		self.vgg_features.to(self.device)
+
+		rs = np.random.RandomState(seed=1337)
+		dataset = AugmentedDataset(data)
+		for source_class in unique_classes:
+			for target_class in unique_classes:
+				if source_class == target_class:
+					continue
+
+				translation_dir = os.path.join(out_dir, '{}-to-{}'.format(source_class, target_class))
+				os.mkdir(translation_dir)
+
+				pbar = tqdm(class_img_ids[source_class])
+				pbar.set_description_str('translating {} to {}'.format(source_class, target_class))
+
+				for source_idx in pbar:
+					target_idxs = rs.choice(class_img_ids[target_class], size=n_translations_per_image, replace=False)
+
+					content_codes = self.content_encoder(dataset[source_idx]['img'].unsqueeze(dim=0).repeat(n_translations_per_image, 1, 1, 1).to(self.device))
+					class_codes = self.class_encoder(dataset[target_idxs]['img'].to(self.device))
+					style_descriptors = self.style_descriptor(dataset[target_idxs]['img'].to(self.device))
+
+					out = self.generator(content_codes, class_codes, style_descriptors)
+					for i in range(n_translations_per_image):
+						torchvision.utils.save_image(out[i].cpu(), os.path.join(translation_dir, '{}-{}.png'.format(source_idx, target_idxs[i])), nrow=1, padding=0)
 
 	def train_latent_generator(self, batch):
 		with torch.no_grad():

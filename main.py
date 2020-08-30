@@ -24,10 +24,8 @@ def train(args):
 	tensorboard_dir = assets.recreate_tensorboard_dir(args.model_name)
 
 	data = np.load(assets.get_preprocess_file_path(args.data_name))
-	imgs = data['img']
+	imgs = data['img'].astype(np.float32) / 255.0
 	classes = data['class']
-
-	imgs = imgs.astype(np.float32) / 255.0
 
 	unique_classes = np.unique(classes)
 	class_index = np.arange(np.max(unique_classes) + 1)
@@ -52,10 +50,8 @@ def amortize(args):
 	tensorboard_dir = assets.get_tensorboard_dir(args.model_name)
 
 	data = np.load(assets.get_preprocess_file_path(args.data_name))
-	imgs = data['img']
+	imgs = data['img'].astype(np.float32) / 255.0
 	classes = data['class']
-
-	imgs = imgs.astype(np.float32) / 255.0
 
 	unique_classes = np.unique(classes)
 	class_index = np.arange(np.max(unique_classes) + 1)
@@ -72,6 +68,20 @@ def amortize(args):
 
 	model = Model.load(model_dir)
 	model.amortize(imgs, classes, amortized_model_dir, amortized_tensorboard_dir)
+
+
+def evaluate(args):
+	assets = AssetManager(args.base_dir)
+	model_dir = assets.get_model_dir(args.model_name)
+	eval_dir = assets.recreate_eval_dir(args.model_name)
+
+	data = np.load(assets.get_preprocess_file_path(args.data_name))
+	imgs = data['img'].astype(np.float32) / 255.0
+	classes = data['class']
+
+	amortized_model_dir = os.path.join(model_dir, 'amortized')
+	model = Model.load(amortized_model_dir)
+	model.generate_for_evaluation(imgs, classes, args.n_translations_per_image, eval_dir)
 
 
 def main():
@@ -96,6 +106,12 @@ def main():
 	amortize_parser.add_argument('-dn', '--data-name', type=str, required=True)
 	amortize_parser.add_argument('-mn', '--model-name', type=str, required=True)
 	amortize_parser.set_defaults(func=amortize)
+
+	evaluate_parser = action_parsers.add_parser('evaluate')
+	evaluate_parser.add_argument('-dn', '--data-name', type=str, required=True)
+	evaluate_parser.add_argument('-mn', '--model-name', type=str, required=True)
+	evaluate_parser.add_argument('-nt', '--n-translations-per-image', type=int, required=True)
+	evaluate_parser.set_defaults(func=evaluate)
 
 	args, extras = parser.parse_known_args()
 	if len(extras) == 0:
