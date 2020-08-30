@@ -268,16 +268,22 @@ class VGGDistance(nn.Module):
 
 class VGGStyle(nn.Module):
 
-	def __init__(self, vgg_features, layer_id):
+	def __init__(self, vgg_features, layer_ids):
 		super().__init__()
 
 		self.vgg_features = vgg_features
-		self.layer_id = layer_id
+		self.layer_ids = layer_ids
 
 	def forward(self, x):
-		features = self.vgg_features(x, [self.layer_id])[0]
+		features = self.vgg_features(x, self.layer_ids)
 
-		means = torch.mean(features, dim=[2, 3])
-		stds = torch.std(features, dim=[2, 3])
+		means = []
+		stds = []
+		for i in range(len(self.layer_ids)):
+			means_i = torch.mean(features[i], dim=[2, 3])
+			stds_i = torch.std(features[i], dim=[2, 3])
 
-		return torch.cat((means, stds), dim=1)
+			means.append(means_i)
+			stds.append(stds_i)
+
+		return torch.cat(means + stds, dim=1)

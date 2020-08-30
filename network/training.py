@@ -49,7 +49,7 @@ class Model:
 
 		self.vgg_features = VGGFeatures()
 		self.perceptual_loss = VGGDistance(self.vgg_features, config['perceptual_loss']['layers'])
-		self.style_descriptor = VGGStyle(self.vgg_features, config['style_descriptor']['layer'])
+		self.style_descriptor = VGGStyle(self.vgg_features, config['style_descriptor']['layers'])
 
 		self.rs = np.random.RandomState(seed=1337)
 
