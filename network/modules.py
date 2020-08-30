@@ -118,7 +118,8 @@ class Encoder(nn.Module):
 		self.main = nn.Sequential(*blocks)
 
 	def forward(self, img):
-		return torch.squeeze(self.main(img))
+		batch_size = img.shape[0]
+		return self.main(img).view(batch_size, -1)
 
 
 class Discriminator(nn.Module):
