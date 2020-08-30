@@ -309,7 +309,7 @@ class Model:
 		content_code = self.content_encoder(batch['img'])
 		class_code = self.class_encoder(batch['img'])
 		img_reconstructed = self.generator(content_code, class_code, style_descriptor)
-		loss_reconstruction = torch.mean(torch.abs(img_reconstructed - batch['img']))
+		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
 
 		loss_content = torch.mean((content_code - batch['content_code']) ** 2, dim=1).mean()
 		loss_class = torch.mean((class_code - batch['class_code']) ** 2, dim=1).mean()
