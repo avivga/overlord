@@ -31,7 +31,7 @@ base_config = dict(
 	),
 
 	amortize=dict(
-		batch_size=8,
+		batch_size=16,
 		n_epochs=1000,
 
 		learning_rate=dict(
