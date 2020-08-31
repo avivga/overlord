@@ -3,7 +3,7 @@ import os
 
 import numpy as np
 
-import dataset
+import data
 from assets import AssetManager
 from network.training import Model
 from config import base_config
@@ -12,7 +12,7 @@ from config import base_config
 def preprocess(args, extras=[]):
 	assets = AssetManager(args.base_dir)
 
-	img_dataset_def = dataset.supported_datasets[args.dataset_id]
+	img_dataset_def = data.supported_datasets[args.dataset_id]
 	img_dataset = img_dataset_def(args.dataset_path, extras)
 
 	np.savez(file=assets.get_preprocess_file_path(args.data_name), **img_dataset.read())
@@ -92,7 +92,7 @@ def main():
 	action_parsers.required = True
 
 	preprocess_parser = action_parsers.add_parser('preprocess')
-	preprocess_parser.add_argument('-di', '--dataset-id', type=str, choices=dataset.supported_datasets, required=True)
+	preprocess_parser.add_argument('-di', '--dataset-id', type=str, choices=data.supported_datasets, required=True)
 	preprocess_parser.add_argument('-dp', '--dataset-path', type=str, required=True)
 	preprocess_parser.add_argument('-dn', '--data-name', type=str, required=True)
 	preprocess_parser.set_defaults(func=preprocess)

@@ -311,13 +311,17 @@ class Model:
 				for source_idx in pbar:
 					target_idxs = rs.choice(class_img_ids[target_class], size=n_translations_per_image, replace=False)
 
-					content_codes = self.content_encoder(dataset[source_idx]['img'].unsqueeze(dim=0).repeat(n_translations_per_image, 1, 1, 1).to(self.device))
+					content_codes = self.content_encoder(torch.cat([dataset[source_idx]['img']] * n_translations_per_image).to(self.device))
 					class_codes = self.class_encoder(dataset[target_idxs]['img'].to(self.device))
 					style_descriptors = self.style_descriptor(dataset[target_idxs]['img'].to(self.device))
 
-					out = self.generator(content_codes, class_codes, style_descriptors)
+					translated_imgs = self.generator(content_codes, class_codes, style_descriptors).cpu()
 					for i in range(n_translations_per_image):
-						torchvision.utils.save_image(out[i].cpu(), os.path.join(translation_dir, '{}-{}.png'.format(source_idx, target_idxs[i])), nrow=1, padding=0)
+						torchvision.utils.save_image(
+							translated_imgs[i],
+							fp=os.path.join(translation_dir, '{}-{}.png'.format(source_idx, target_idxs[i])),
+							nrow=1, padding=0
+						)
 
 	def train_latent_generator(self, batch):
 		with torch.no_grad():
