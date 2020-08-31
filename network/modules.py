@@ -122,7 +122,7 @@ class Encoder(nn.Module):
 		return self.main(img).view(batch_size, -1)
 
 
-class Discriminator(nn.Module):
+class ConditionalDiscriminator(nn.Module):
 
 	def __init__(self, img_size, n_classes, max_conv_dim=256):
 		super().__init__()

@@ -18,8 +18,10 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torchvision
 
-from network.modules import Generator, Encoder, Discriminator, VGGFeatures, VGGDistance, VGGStyle
-from network.utils import AugmentedDataset
+from network.modules import Generator, Encoder, VGGFeatures, VGGDistance, VGGStyle
+from network.utils import NamedTensorDataset, AugmentedDataset
+
+from model import Discriminator
 
 
 class Model:
@@ -44,7 +46,7 @@ class Model:
 			style_descriptor_dim=config['style_descriptor']['dim']
 		)
 
-		self.discriminator = Discriminator(img_size=config['img_shape'][0], n_classes=config['n_classes'])
+		self.discriminator = Discriminator(size=config['img_shape'][0])
 		self.content_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['content_dim'])
 		self.class_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['class_dim'])
 
@@ -178,15 +180,10 @@ class Model:
 			class_id=torch.from_numpy(classes.astype(np.int64))
 		)
 
-		class_img_ids = {
-			class_id: np.where(classes == class_id)[0]
-			for class_id in np.unique(classes)
-		}
-
-		dataset = AugmentedDataset(data)
+		dataset = NamedTensorDataset(data)
 		data_loader = DataLoader(
 			dataset, batch_size=self.config['amortize']['batch_size'],
-			shuffle=True, pin_memory=True, drop_last=False
+			shuffle=True, pin_memory=True, drop_last=True
 		)
 
 		generator_optimizer = Adam(
@@ -221,12 +218,6 @@ class Model:
 
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
-				target_class_ids = np.random.choice(self.config['n_classes'], size=batch['img_id'].shape[0])
-				batch['target_class_id'] = torch.from_numpy(target_class_ids)
-
-				target_class_img_ids = np.array([np.random.choice(class_img_ids[class_id]) for class_id in target_class_ids])
-				batch['target_class_img'] = data['img'][target_class_img_ids]
-
 				batch['content_code'] = self.content_embedding(batch['img_id'])
 				batch['class_code'] = self.class_embedding(batch['class_id'])
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
@@ -362,12 +353,7 @@ class Model:
 		loss_content = torch.mean((content_code - batch['content_code']) ** 2, dim=1).mean()
 		loss_class = torch.mean((class_code - batch['class_code']) ** 2, dim=1).mean()
 
-		with torch.no_grad():
-			target_style_descriptor = self.style_descriptor(batch['target_class_img'])
-
-		target_class_code = self.class_encoder(batch['target_class_img'])
-		img_converted = self.generator(content_code, target_class_code, target_style_descriptor)
-		discriminator_fake = self.discriminator(img_converted, batch['target_class_id'])
+		discriminator_fake = self.discriminator(img_reconstructed)
 		loss_adversarial = self.adv_loss(discriminator_fake, 1)
 
 		return {
@@ -379,13 +365,13 @@ class Model:
 	def train_discriminator(self, batch):
 		with torch.no_grad():
 			content_code = self.content_encoder(batch['img'])
-			target_class_code = self.class_encoder(batch['target_class_img'])
-			target_style_descriptor = self.style_descriptor(batch['target_class_img'])
-			img_converted = self.generator(content_code, target_class_code, target_style_descriptor)
+			class_code = self.class_encoder(batch['img'])
+			style_descriptor = self.style_descriptor(batch['img'])
+			img_reconstructed = self.generator(content_code, class_code, style_descriptor)
 
 		batch['img'].requires_grad_()  # for gradient penalty
-		discriminator_fake = self.discriminator(img_converted, batch['target_class_id'])
-		discriminator_real = self.discriminator(batch['img'], batch['class_id'])
+		discriminator_fake = self.discriminator(img_reconstructed)
+		discriminator_real = self.discriminator(batch['img'])
 
 		loss_fake = self.adv_loss(discriminator_fake, 0)
 		loss_real = self.adv_loss(discriminator_real, 1)
