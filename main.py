@@ -70,7 +70,7 @@ def amortize(args):
 	model.amortize(imgs, classes, amortized_model_dir, amortized_tensorboard_dir)
 
 
-def evaluate(args):
+def translate(args):
 	assets = AssetManager(args.base_dir)
 	model_dir = assets.get_model_dir(args.model_name)
 	eval_dir = assets.recreate_eval_dir(args.model_name)
@@ -81,7 +81,7 @@ def evaluate(args):
 
 	amortized_model_dir = os.path.join(model_dir, 'amortized')
 	model = Model.load(amortized_model_dir)
-	model.generate_for_evaluation(imgs, classes, args.n_translations_per_image, eval_dir)
+	model.translate(imgs, classes, args.n_translations_per_image, eval_dir)
 
 
 def main():
@@ -107,11 +107,11 @@ def main():
 	amortize_parser.add_argument('-mn', '--model-name', type=str, required=True)
 	amortize_parser.set_defaults(func=amortize)
 
-	evaluate_parser = action_parsers.add_parser('evaluate')
-	evaluate_parser.add_argument('-dn', '--data-name', type=str, required=True)
-	evaluate_parser.add_argument('-mn', '--model-name', type=str, required=True)
-	evaluate_parser.add_argument('-nt', '--n-translations-per-image', type=int, required=True)
-	evaluate_parser.set_defaults(func=evaluate)
+	translate_parser = action_parsers.add_parser('translate')
+	translate_parser.add_argument('-dn', '--data-name', type=str, required=True)
+	translate_parser.add_argument('-mn', '--model-name', type=str, required=True)
+	translate_parser.add_argument('-nt', '--n-translations-per-image', type=int, required=True)
+	translate_parser.set_defaults(func=translate)
 
 	args, extras = parser.parse_known_args()
 	if len(extras) == 0:

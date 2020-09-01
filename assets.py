@@ -23,7 +23,7 @@ class AssetManager:
 		if not os.path.exists(self.__tensorboard_dir):
 			os.mkdir(self.__tensorboard_dir)
 
-		self.__eval_dir = os.path.join(self.__cache_dir, 'eval')
+		self.__eval_dir = os.path.join(self.__base_dir, 'eval')
 		if not os.path.exists(self.__eval_dir):
 			os.mkdir(self.__eval_dir)
 

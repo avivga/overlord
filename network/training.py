@@ -272,7 +272,7 @@ class Model:
 		summary.close()
 
 	@torch.no_grad()
-	def generate_for_evaluation(self, imgs, classes, n_translations_per_image, out_dir):
+	def translate(self, imgs, classes, n_translations_per_image, out_dir):
 		data = dict(
 			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
 			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
@@ -297,31 +297,45 @@ class Model:
 
 		rs = np.random.RandomState(seed=1337)
 		dataset = AugmentedDataset(data)
-		for source_class in unique_classes:
-			for target_class in unique_classes:
-				if source_class == target_class:
-					continue
+		for source_class, target_class in itertools.product(unique_classes, unique_classes):
+			if source_class == target_class:
+				continue
 
-				translation_dir = os.path.join(out_dir, '{}-to-{}'.format(source_class, target_class))
-				os.mkdir(translation_dir)
+			translation_dir = os.path.join(out_dir, '{}-to-{}'.format(source_class, target_class))
+			os.mkdir(translation_dir)
 
-				pbar = tqdm(class_img_ids[source_class])
-				pbar.set_description_str('translating {} to {}'.format(source_class, target_class))
+			os.mkdir(os.path.join(translation_dir, 'content'))
+			os.mkdir(os.path.join(translation_dir, 'style'))
+			os.mkdir(os.path.join(translation_dir, 'translation'))
 
-				for source_idx in pbar:
-					target_idxs = rs.choice(class_img_ids[target_class], size=n_translations_per_image, replace=False)
+			pbar = tqdm(class_img_ids[source_class])
+			pbar.set_description_str('translating {} to {}'.format(source_class, target_class))
 
-					content_codes = self.content_encoder(torch.stack([dataset[source_idx]['img']] * n_translations_per_image).to(self.device))
-					class_codes = self.class_encoder(dataset[target_idxs]['img'].to(self.device))
-					style_descriptors = self.style_descriptor(dataset[target_idxs]['img'].to(self.device))
+			for content_idx in pbar:
+				style_idxs = rs.choice(class_img_ids[target_class], size=n_translations_per_image, replace=False)
 
-					translated_imgs = self.generator(content_codes, class_codes, style_descriptors).cpu()
-					for i in range(n_translations_per_image):
-						torchvision.utils.save_image(
-							translated_imgs[i],
-							os.path.join(translation_dir, '{}-{}.png'.format(source_idx, target_idxs[i])),
-							nrow=1, padding=0
-						)
+				content_imgs = torch.stack([dataset[content_idx]['img']] * n_translations_per_image, dim=0)
+				style_imgs = dataset[style_idxs]['img']
+
+				content_codes = self.content_encoder(content_imgs.to(self.device))
+				class_codes = self.class_encoder(style_imgs.to(self.device))
+				style_descriptors = self.style_descriptor(style_imgs.to(self.device))
+
+				translated_imgs = self.generator(content_codes, class_codes, style_descriptors).cpu()
+				for i in range(n_translations_per_image):
+					torchvision.utils.save_image(content_imgs[i],
+						os.path.join(translation_dir, 'content', '{}.png'.format(content_idx))
+					)
+
+					torchvision.utils.save_image(
+						style_imgs[i],
+						os.path.join(translation_dir, 'style', '{}.png'.format(style_idxs[i]))
+					)
+
+					torchvision.utils.save_image(
+						translated_imgs[i],
+						os.path.join(translation_dir, 'translation', '{}-{}.png'.format(content_idx, style_idxs[i]))
+					)
 
 	def train_latent_generator(self, batch):
 		with torch.no_grad():
