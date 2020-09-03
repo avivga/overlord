@@ -18,6 +18,38 @@ def preprocess(args, extras=[]):
 	np.savez(file=assets.get_preprocess_file_path(args.data_name), **img_dataset.read())
 
 
+def split(args):
+	assets = AssetManager(args.base_dir)
+	data = np.load(assets.get_preprocess_file_path(args.input_data_name))
+
+	unique_values = np.unique(data[args.key])
+	values_a = np.random.choice(unique_values, size=args.n_values, replace=False)
+	values_b = np.array([v for v in unique_values if v not in values_a])
+	idx_a = np.isin(data[args.key], values_a)
+	idx_b = np.isin(data[args.key], values_b)
+
+	arrays_a = {
+		key: data[key][idx_a]
+		for key in data.files
+	}
+
+	arrays_b = {
+		key: data[key][idx_b]
+		for key in data.files
+	}
+
+	reindex_a = np.zeros(shape=(unique_values.size,), dtype=arrays_a[args.key].dtype)
+	reindex_a[values_a] = np.arange(args.n_values)
+	arrays_a[args.key] = reindex_a[arrays_a[args.key]]
+
+	reindex_b = np.zeros(shape=(unique_values.size,), dtype=arrays_b[args.key].dtype)
+	reindex_b[values_b] = np.arange(unique_values.size - args.n_values)
+	arrays_b[args.key] = reindex_b[arrays_b[args.key]]
+
+	np.savez(file=assets.get_preprocess_file_path(args.output_data_name_a), **arrays_a)
+	np.savez(file=assets.get_preprocess_file_path(args.output_data_name_b), **arrays_b)
+
+
 def train(args):
 	assets = AssetManager(args.base_dir)
 	model_dir = assets.recreate_model_dir(args.model_name)
@@ -27,15 +59,10 @@ def train(args):
 	imgs = data['img'].astype(np.float32) / 255.0
 	classes = data['class']
 
-	unique_classes = np.unique(classes)
-	class_index = np.arange(np.max(unique_classes) + 1)
-	class_index[unique_classes] = np.arange(unique_classes.size)
-	classes = class_index[classes]
-
 	config = dict(
 		img_shape=imgs.shape[1:],
 		n_imgs=imgs.shape[0],
-		n_classes=unique_classes.size
+		n_classes=np.unique(classes).size
 	)
 
 	config.update(base_config)
@@ -52,11 +79,6 @@ def amortize(args):
 	data = np.load(assets.get_preprocess_file_path(args.data_name))
 	imgs = data['img'].astype(np.float32) / 255.0
 	classes = data['class']
-
-	unique_classes = np.unique(classes)
-	class_index = np.arange(np.max(unique_classes) + 1)
-	class_index[unique_classes] = np.arange(unique_classes.size)
-	classes = class_index[classes]
 
 	amortized_model_dir = os.path.join(model_dir, 'amortized')
 	if not os.path.exists(amortized_model_dir):
@@ -99,6 +121,14 @@ def main():
 	preprocess_parser.add_argument('-dp', '--dataset-path', type=str, required=True)
 	preprocess_parser.add_argument('-dn', '--data-name', type=str, required=True)
 	preprocess_parser.set_defaults(func=preprocess)
+
+	split_parser = action_parsers.add_parser('split')
+	split_parser.add_argument('-i', '--input-data-name', type=str, required=True)
+	split_parser.add_argument('-a', '--output-data-name-a', type=str, required=True)
+	split_parser.add_argument('-b', '--output-data-name-b', type=str, required=True)
+	split_parser.add_argument('-k', '--key', type=str, required=True)
+	split_parser.add_argument('-n', '--n-values', type=int, required=True)
+	split_parser.set_defaults(func=split)
 
 	train_parser = action_parsers.add_parser('train')
 	train_parser.add_argument('-dn', '--data-name', type=str, required=True)
