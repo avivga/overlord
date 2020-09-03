@@ -106,7 +106,11 @@ def translate(args):
 
 	amortized_model_dir = os.path.join(model_dir, 'amortized')
 	model = Model.load(amortized_model_dir)
-	model.translate(imgs, classes, args.n_translations_per_image, out_dir)
+
+	if args.full:
+		model.translate_full(imgs, classes, args.n_translations_per_image, out_dir)
+	else:
+		model.translate(imgs, classes, args.n_translations_per_image, out_dir)
 
 
 def main():
@@ -144,6 +148,7 @@ def main():
 	translate_parser.add_argument('-dn', '--data-name', type=str, required=True)
 	translate_parser.add_argument('-mn', '--model-name', type=str, required=True)
 	translate_parser.add_argument('-nt', '--n-translations-per-image', type=int, required=True)
+	translate_parser.add_argument('-f', '--full', action='store_true')
 	translate_parser.set_defaults(func=translate)
 
 	args, extras = parser.parse_known_args()
