@@ -330,11 +330,59 @@ class Cars3D(DataSet):
 		}
 
 
+class AB(DataSet):
+
+	def __init__(self, base_dir, extras):
+		super().__init__(base_dir)
+
+		parser = argparse.ArgumentParser()
+		parser.add_argument('-sp', '--split', type=str, choices=['train', 'test'], required=True)
+		parser.add_argument('-is', '--img-size', type=int, default=128)
+
+		args = parser.parse_args(extras)
+		self.__dict__.update(vars(args))
+
+	def read(self):
+		img_paths_a = glob.glob(os.path.join(self._base_dir, self.split + 'A', '*.jpg'))
+		img_paths_b = glob.glob(os.path.join(self._base_dir, self.split + 'B', '*.jpg'))
+
+		imgs_a = np.empty(shape=(len(img_paths_a), self.img_size, self.img_size, 3), dtype=np.uint8)
+		imgs_b = np.empty(shape=(len(img_paths_b), self.img_size, self.img_size, 3), dtype=np.uint8)
+
+		for i in range(len(img_paths_a)):
+			img = imageio.imread(img_paths_a[i])
+
+			if len(img.shape) == 2:
+				img = np.tile(img[..., np.newaxis], reps=(1, 1, 3))
+
+			imgs_a[i] = cv2.resize(img, dsize=(self.img_size, self.img_size))
+
+		for i in range(len(img_paths_b)):
+			img = imageio.imread(img_paths_b[i])
+
+			if len(img.shape) == 2:
+				img = np.tile(img[..., np.newaxis], reps=(1, 1, 3))
+
+			imgs_b[i] = cv2.resize(img, dsize=(self.img_size, self.img_size))
+
+		imgs = np.concatenate((imgs_a, imgs_b), axis=0)
+		classes = np.concatenate((
+			np.zeros(shape=(imgs_a.shape[0], ), dtype=np.uint8),
+			np.ones(shape=(imgs_b.shape[0], ), dtype=np.uint8)
+		), axis=0)
+
+		return {
+			'img': imgs,
+			'class': classes
+		}
+
+
 supported_datasets = {
 	'afhq': AFHQ,
 	'animalfaces': AnimalFaces,
 	'cub': Cub,
 	'edges2shoes': Edges2Shoes,
 	'celeba': CelebA,
-	'cars3d': Cars3D
+	'cars3d': Cars3D,
+	'ab': AB
 }
