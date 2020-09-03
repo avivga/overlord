@@ -16,7 +16,7 @@ base_config = dict(
 
 	train=dict(
 		batch_size=16,
-		n_epochs=500,
+		n_epochs=100,
 
 		learning_rate=dict(
 			latent=1e-2,
@@ -32,7 +32,7 @@ base_config = dict(
 
 	amortize=dict(
 		batch_size=16,
-		n_epochs=1000,
+		n_epochs=100,
 
 		learning_rate=dict(
 			generator=1e-4,
