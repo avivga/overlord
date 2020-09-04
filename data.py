@@ -37,7 +37,7 @@ class AFHQ(DataSet):
 		self.__dict__.update(vars(args))
 
 	def read(self):
-		class_ids = os.listdir(os.path.join(self._base_dir, self.split))
+		class_ids = sorted(os.listdir(os.path.join(self._base_dir, self.split)))
 
 		imgs = []
 		classes = []
@@ -379,6 +379,7 @@ class AB(DataSet):
 
 supported_datasets = {
 	'afhq': AFHQ,
+	'celebahq': AFHQ,  # same structure
 	'animalfaces': AnimalFaces,
 	'cub': Cub,
 	'edges2shoes': Edges2Shoes,
