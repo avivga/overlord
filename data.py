@@ -9,6 +9,7 @@ import numpy as np
 import scipy.io
 import cv2
 
+from xml.etree import ElementTree
 from tqdm import tqdm
 
 
@@ -51,6 +52,84 @@ class AFHQ(DataSet):
 		return {
 			'img': np.concatenate(imgs, axis=0),
 			'class': np.concatenate(classes, axis=0)
+		}
+
+
+class Carnivores(DataSet):  # from imagenet
+
+	def __init__(self, base_dir, extras):
+		super().__init__(base_dir)
+
+		parser = argparse.ArgumentParser()
+		parser.add_argument('-sp', '--split', type=str, choices=['train', 'val'], required=True)
+		parser.add_argument('-cn', '--class-name-list', type=str, required=True)
+		parser.add_argument('-is', '--img-size', type=int, default=128)
+
+		args = parser.parse_args(extras)
+		self.__dict__.update(vars(args))
+
+	def read(self):
+		with open(self.class_name_list, 'r') as fp:
+			class_ids = fp.read().splitlines()
+
+		imgs = []
+		classes = []
+
+		for class_idx, class_id in enumerate(class_ids):
+			img_names = os.listdir(os.path.join(self._base_dir, 'imgs', self.split, class_id))
+
+			pbar = tqdm(img_names)
+			for img_name in pbar:
+				pbar.set_description_str('preprocessing {}[{}]'.format(class_id, img_name))
+				img = imageio.imread(os.path.join(self._base_dir, 'imgs', self.split, class_id, img_name))
+				if len(img.shape) == 2:
+					img = np.tile(img[..., np.newaxis], reps=(1, 1, 3))
+
+				img_id = os.path.splitext(img_name)[0]
+				annotation_path = os.path.join(self._base_dir, 'annotations', self.split, class_id, img_id + '.xml')
+				if not os.path.exists(annotation_path):
+					continue
+
+				root = ElementTree.parse(annotation_path).getroot()
+				bounding_boxes = root.findall('object/bndbox')
+
+				# bb = bounding_boxes[0]  # rest are sometimes broken
+				for bb in bounding_boxes:
+					x_min, x_max, y_min, y_max = (
+						int(bb.find('xmin').text), int(bb.find('xmax').text),
+						int(bb.find('ymin').text), int(bb.find('ymax').text)
+					)
+
+					bb_width = x_max - x_min
+					bb_height = y_max - y_min
+
+					size = max(bb_width, bb_height)
+					if size < 64:
+						continue
+
+					x_padding = (size - bb_width) // 2
+					y_padding = (size - bb_height) // 2
+
+					x_min = max(x_min - x_padding, 0)
+					y_min = max(y_min - y_padding, 0)
+
+					x_max = x_min + size
+					y_max = y_min + size
+
+					if x_max >= img.shape[1] or y_max >= img.shape[0]:
+						img_padded = np.pad(img, ((0, max(y_max - img.shape[0], 0)), (0, max(x_max - img.shape[1], 0)), (0, 0)), mode='reflect')
+					else:
+						img_padded = img
+
+					img_cropped = img_padded[y_min:y_max, x_min:x_max]
+					img_resized = cv2.resize(img_cropped, dsize=(self.img_size, self.img_size))
+
+					imgs.append(img_resized)
+					classes.append(class_idx)
+
+		return {
+			'img': np.stack(imgs, axis=0),
+			'class': np.array(classes, dtype=np.int32)
 		}
 
 
@@ -381,6 +460,7 @@ supported_datasets = {
 	'afhq': AFHQ,
 	'celebahq': AFHQ,  # same structure
 	'animalfaces': AnimalFaces,
+	'carnivores': Carnivores,
 	'cub': Cub,
 	'edges2shoes': Edges2Shoes,
 	'celeba': CelebA,
