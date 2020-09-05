@@ -1,6 +1,8 @@
 # based on evaluation of StarGAN-v2
 import argparse
-import os
+
+from pathlib import Path
+from itertools import chain
 
 import numpy as np
 from scipy import linalg
@@ -14,10 +16,16 @@ import torch.nn as nn
 from torchvision import models, transforms
 
 
+def listdir(dname):
+	fnames = list(chain(*[list(Path(dname).rglob('*.' + ext))
+	                      for ext in ['png', 'jpg', 'jpeg', 'JPG']]))
+	return fnames
+
+
 class DefaultDataset(data.Dataset):
 
 	def __init__(self, root, transform=None):
-		self.samples = os.listdir(root)
+		self.samples = listdir(root)
 		self.samples.sort()
 		self.transform = transform
 		self.targets = None
