@@ -271,6 +271,87 @@ class Model:
 
 		summary.close()
 
+	def train_latent_generator(self, batch):
+		with torch.no_grad():
+			style_descriptor = self.style_descriptor(batch['img_augmented'])
+
+		if self.config['content_std'] != 0:
+			noise = torch.zeros_like(batch['content_code'])
+			noise.normal_(mean=0, std=self.config['content_std'])
+
+			content_code_regularized = batch['content_code'] + noise
+		else:
+			content_code_regularized = batch['content_code']
+
+		img_reconstructed = self.generator(content_code_regularized, batch['class_code'], style_descriptor)
+		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
+
+		loss_content_decay = torch.sum(batch['content_code'] ** 2, dim=1).mean()
+
+		return {
+			'reconstruction': loss_reconstruction,
+			'content_decay': loss_content_decay
+		}
+
+	def train_amortized_generator(self, batch):
+		with torch.no_grad():
+			style_descriptor = self.style_descriptor(batch['img'])
+
+		content_code = self.content_encoder(batch['img'])
+		class_code = self.class_encoder(batch['img'])
+		img_reconstructed = self.generator(content_code, class_code, style_descriptor)
+		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
+
+		loss_content = torch.mean((content_code - batch['content_code']) ** 2, dim=1).mean()
+		loss_class = torch.mean((class_code - batch['class_code']) ** 2, dim=1).mean()
+
+		discriminator_fake = self.discriminator(img_reconstructed)
+		loss_adversarial = self.adv_loss(discriminator_fake, 1)
+
+		return {
+			'reconstruction': loss_reconstruction,
+			'latent': loss_content + loss_class,
+			'adversarial': loss_adversarial
+		}
+
+	def train_discriminator(self, batch):
+		with torch.no_grad():
+			content_code = self.content_encoder(batch['img'])
+			class_code = self.class_encoder(batch['img'])
+			style_descriptor = self.style_descriptor(batch['img'])
+			img_reconstructed = self.generator(content_code, class_code, style_descriptor)
+
+		batch['img'].requires_grad_()  # for gradient penalty
+		discriminator_fake = self.discriminator(img_reconstructed)
+		discriminator_real = self.discriminator(batch['img'])
+
+		loss_fake = self.adv_loss(discriminator_fake, 0)
+		loss_real = self.adv_loss(discriminator_real, 1)
+		loss_gp = self.gradient_penalty(discriminator_real, batch['img'])
+
+		return {
+			'fake': loss_fake,
+			'real': loss_real,
+			'gradient_penalty': loss_gp
+		}
+
+	def adv_loss(self, logits, target):
+		assert target in [1, 0]
+		targets = torch.full_like(logits, fill_value=target)
+		loss = F.binary_cross_entropy_with_logits(logits, targets)
+		return loss
+
+	def gradient_penalty(self, d_out, x_in):
+		batch_size = x_in.size(0)
+		grad_dout = torch.autograd.grad(
+			outputs=d_out.sum(), inputs=x_in,
+			create_graph=True, retain_graph=True, only_inputs=True
+		)[0]
+		grad_dout2 = grad_dout.pow(2)
+		assert(grad_dout2.size() == x_in.size())
+		reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
+		return reg
+
 	@torch.no_grad()
 	def translate_full(self, imgs, classes, n_translations_per_image, out_dir):
 		data = dict(
@@ -323,7 +404,8 @@ class Model:
 
 				translated_imgs = self.generator(content_codes, class_codes, style_descriptors).cpu()
 				for i in range(n_translations_per_image):
-					torchvision.utils.save_image(content_imgs[i],
+					torchvision.utils.save_image(
+						content_imgs[i],
 						os.path.join(translation_dir, 'content', '{}.png'.format(content_idx))
 					)
 
@@ -411,86 +493,31 @@ class Model:
 			summary_img = self.generate_samples(dataset, summary_size, randomized=True, amortized=True)
 			torchvision.utils.save_image(summary_img, os.path.join(out_dir, '{}.png'.format(i)))
 
-	def train_latent_generator(self, batch):
-		with torch.no_grad():
-			style_descriptor = self.style_descriptor(batch['img_augmented'])
+	@torch.no_grad()
+	def encode(self, imgs, classes, out_path):
+		data = dict(
+			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
+			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
+			class_id=torch.from_numpy(classes.astype(np.int64))
+		)
 
-		if self.config['content_std'] != 0:
-			noise = torch.zeros_like(batch['content_code'])
-			noise.normal_(mean=0, std=self.config['content_std'])
+		dataset = NamedTensorDataset(data)
 
-			content_code_regularized = batch['content_code'] + noise
-		else:
-			content_code_regularized = batch['content_code']
+		self.content_encoder.eval()
+		self.class_encoder.eval()
 
-		img_reconstructed = self.generator(content_code_regularized, batch['class_code'], style_descriptor)
-		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
+		self.content_encoder.to(self.device)
+		self.class_encoder.to(self.device)
+		self.generator.to(self.device)
+		self.vgg_features.to(self.device)
 
-		loss_content_decay = torch.sum(batch['content_code'] ** 2, dim=1).mean()
-
-		return {
-			'reconstruction': loss_reconstruction,
-			'content_decay': loss_content_decay
-		}
-
-	def train_amortized_generator(self, batch):
-		with torch.no_grad():
-			style_descriptor = self.style_descriptor(batch['img'])
-
-		content_code = self.content_encoder(batch['img'])
-		class_code = self.class_encoder(batch['img'])
-		img_reconstructed = self.generator(content_code, class_code, style_descriptor)
-		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
-
-		loss_content = torch.mean((content_code - batch['content_code']) ** 2, dim=1).mean()
-		loss_class = torch.mean((class_code - batch['class_code']) ** 2, dim=1).mean()
-
-		discriminator_fake = self.discriminator(img_reconstructed)
-		loss_adversarial = self.adv_loss(discriminator_fake, 1)
-
-		return {
-			'reconstruction': loss_reconstruction,
-			'latent': loss_content + loss_class,
-			'adversarial': loss_adversarial
-		}
-
-	def train_discriminator(self, batch):
-		with torch.no_grad():
-			content_code = self.content_encoder(batch['img'])
-			class_code = self.class_encoder(batch['img'])
-			style_descriptor = self.style_descriptor(batch['img'])
-			img_reconstructed = self.generator(content_code, class_code, style_descriptor)
-
-		batch['img'].requires_grad_()  # for gradient penalty
-		discriminator_fake = self.discriminator(img_reconstructed)
-		discriminator_real = self.discriminator(batch['img'])
-
-		loss_fake = self.adv_loss(discriminator_fake, 0)
-		loss_real = self.adv_loss(discriminator_real, 1)
-		loss_gp = self.gradient_penalty(discriminator_real, batch['img'])
-
-		return {
-			'fake': loss_fake,
-			'real': loss_real,
-			'gradient_penalty': loss_gp
-		}
-
-	def adv_loss(self, logits, target):
-		assert target in [1, 0]
-		targets = torch.full_like(logits, fill_value=target)
-		loss = F.binary_cross_entropy_with_logits(logits, targets)
-		return loss
-
-	def gradient_penalty(self, d_out, x_in):
-		batch_size = x_in.size(0)
-		grad_dout = torch.autograd.grad(
-			outputs=d_out.sum(), inputs=x_in,
-			create_graph=True, retain_graph=True, only_inputs=True
-		)[0]
-		grad_dout2 = grad_dout.pow(2)
-		assert(grad_dout2.size() == x_in.size())
-		reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
-		return reg
+		np.savez(
+			file=out_path,
+			content_codes=self.encode_content(dataset, amortized=True),
+			class_codes=self.encode_class(dataset, amortized=True),
+			style_codes=self.encode_style(dataset),
+			class_ids=classes
+		)
 
 	@torch.no_grad()
 	def generate_samples(self, dataset, n_samples=10, randomized=False, amortized=False):
