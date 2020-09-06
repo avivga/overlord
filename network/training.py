@@ -164,7 +164,7 @@ class Model:
 			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
 
 			if epoch % 10 == 0:
-				content_codes = self.extract_codes(dataset)
+				content_codes = self.encode_content(dataset)
 				score_train, score_test = self.classification_score(X=content_codes, y=classes)
 				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
 				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
@@ -262,7 +262,7 @@ class Model:
 			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
 
 			if epoch % 10 == 0:
-				content_codes = self.extract_codes(dataset, amortized=True)
+				content_codes = self.encode_content(dataset, amortized=True)
 				score_train, score_test = self.classification_score(X=content_codes, y=classes)
 				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
 				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
@@ -510,10 +510,11 @@ class Model:
 		return summary.clamp(min=0, max=1)
 
 	@torch.no_grad()
-	def extract_codes(self, dataset, amortized=False):
-		data_loader = DataLoader(dataset, batch_size=32, shuffle=False, pin_memory=True, drop_last=False)
+	def encode_content(self, dataset, amortized=False):
+		self.content_encoder.eval()
 
 		content_codes = []
+		data_loader = DataLoader(dataset, batch_size=64, shuffle=False, pin_memory=True, drop_last=False)
 		for batch in data_loader:
 			if amortized:
 				batch_content_codes = self.content_encoder(batch['img'].to(self.device))
@@ -524,6 +525,35 @@ class Model:
 
 		content_codes = np.concatenate(content_codes, axis=0)
 		return content_codes
+
+	@torch.no_grad()
+	def encode_class(self, dataset, amortized=False):
+		self.class_encoder.eval()
+
+		class_codes = []
+		data_loader = DataLoader(dataset, batch_size=64, shuffle=False, pin_memory=True, drop_last=False)
+		for batch in data_loader:
+			if amortized:
+				batch_class_codes = self.class_encoder(batch['img'].to(self.device))
+			else:
+				batch_class_codes = self.class_embedding(batch['img_id'])
+
+			class_codes.append(batch_class_codes.cpu().numpy())
+
+		class_codes = np.concatenate(class_codes, axis=0)
+		return class_codes
+
+	@torch.no_grad()
+	def encode_style(self, dataset):
+		style_codes = []
+		data_loader = DataLoader(dataset, batch_size=64, shuffle=False, pin_memory=True, drop_last=False)
+		for batch in data_loader:
+			batch_style_descriptors = self.style_descriptor(batch['img'].to(self.device))
+			batch_style_codes = self.generator.style_projector(batch_style_descriptors)
+			style_codes.append(batch_style_codes.cpu().numpy())
+
+		style_codes = np.concatenate(style_codes, axis=0)
+		return style_codes
 
 	@staticmethod
 	def classification_score(X, y):
