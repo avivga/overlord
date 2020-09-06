@@ -64,6 +64,7 @@ class Carnivores(DataSet):  # from imagenet
 		parser.add_argument('-sp', '--split', type=str, choices=['train', 'val'], required=True)
 		parser.add_argument('-cn', '--class-name-list', type=str, required=True)
 		parser.add_argument('-is', '--img-size', type=int, default=128)
+		parser.add_argument('-nc', '--n-classes', type=int, required=False)
 
 		args = parser.parse_args(extras)
 		self.__dict__.update(vars(args))
@@ -71,6 +72,9 @@ class Carnivores(DataSet):  # from imagenet
 	def read(self):
 		with open(self.class_name_list, 'r') as fp:
 			class_ids = fp.read().splitlines()
+
+		if self.n_classes:
+			class_ids = random.sample(class_ids, k=self.n_classes)
 
 		imgs = []
 		classes = []
