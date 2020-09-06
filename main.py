@@ -113,6 +113,24 @@ def translate(args):
 		model.translate(imgs, classes, args.n_translations_per_image, out_dir)
 
 
+def summary(args):
+	assets = AssetManager(args.base_dir)
+	model_dir = assets.get_model_dir(args.model_name)
+	eval_dir = assets.get_eval_dir(args.model_name)
+
+	out_dir = os.path.join(eval_dir, 'summaries')
+	if not os.path.exists(out_dir):
+		os.mkdir(out_dir)
+
+	data = np.load(assets.get_preprocess_file_path(args.data_name))
+	imgs = data['img'].astype(np.float32) / 255.0
+	classes = data['class']
+
+	amortized_model_dir = os.path.join(model_dir, 'amortized')
+	model = Model.load(amortized_model_dir)
+	model.summary(imgs, classes, args.n_summaries, args.summary_size, out_dir)
+
+
 def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('-bd', '--base-dir', type=str, required=True)
@@ -150,6 +168,13 @@ def main():
 	translate_parser.add_argument('-nt', '--n-translations-per-image', type=int, required=True)
 	translate_parser.add_argument('-f', '--full', action='store_true')
 	translate_parser.set_defaults(func=translate)
+
+	summary_parser = action_parsers.add_parser('summary')
+	summary_parser.add_argument('-dn', '--data-name', type=str, required=True)
+	summary_parser.add_argument('-mn', '--model-name', type=str, required=True)
+	summary_parser.add_argument('-ns', '--n-summaries', type=int, required=True)
+	summary_parser.add_argument('-ss', '--summary-size', type=int, required=True)
+	summary_parser.set_defaults(func=summary)
 
 	args, extras = parser.parse_known_args()
 	if len(extras) == 0:

@@ -296,7 +296,7 @@ class Model:
 		self.vgg_features.to(self.device)
 
 		rs = np.random.RandomState(seed=1337)
-		dataset = AugmentedDataset(data)
+		dataset = NamedTensorDataset(data)
 		for source_class, target_class in itertools.product(unique_classes, unique_classes):
 			if source_class == target_class:
 				continue
@@ -355,7 +355,7 @@ class Model:
 		self.vgg_features.to(self.device)
 
 		rs = np.random.RandomState(seed=1337)
-		dataset = AugmentedDataset(data)
+		dataset = NamedTensorDataset(data)
 
 		os.mkdir(os.path.join(out_dir, 'content'))
 		os.mkdir(os.path.join(out_dir, 'style'))
@@ -387,6 +387,29 @@ class Model:
 					translated_imgs[i],
 					os.path.join(out_dir, 'translation', '{}-{}.png'.format(content_idx, style_idxs[i]))
 				)
+
+	@torch.no_grad()
+	def summary(self, imgs, classes, n_summaries, summary_size, out_dir):
+		data = dict(
+			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
+			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
+			class_id=torch.from_numpy(classes.astype(np.int64))
+		)
+
+		dataset = NamedTensorDataset(data)
+
+		self.content_encoder.eval()
+		self.class_encoder.eval()
+		self.generator.eval()
+
+		self.content_encoder.to(self.device)
+		self.class_encoder.to(self.device)
+		self.generator.to(self.device)
+		self.vgg_features.to(self.device)
+
+		for i in range(n_summaries):
+			summary_img = self.generate_samples(dataset, summary_size, randomized=True, amortized=True)
+			torchvision.utils.save_image(summary_img, os.path.join(out_dir, '{}.png'.format(i)))
 
 	def train_latent_generator(self, batch):
 		with torch.no_grad():
