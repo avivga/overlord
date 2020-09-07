@@ -49,15 +49,21 @@ def face_embeddings(img_dir):
 
 	embeddings = {}
 	paths = [os.path.join(img_dir, f) for f in os.listdir(img_dir)]
-	for path in tqdm(paths):
-		img = Image.open(path)
-		img_cropped = mtcnn(img)
-		if img_cropped is None:
-			print('failed to find face in {}'.format(path))
-			continue
 
-		embedding = facenet(img_cropped.unsqueeze(0).to(device))
-		embeddings[path] = embedding.squeeze(0).cpu().numpy()
+	batch_size = 64
+	n_batches = int(np.ceil(len(paths) / batch_size))
+
+	for b in tqdm(range(n_batches)):
+		batch_paths = paths[b*batch_size:(b+1)*batch_size]
+		batch_imgs = [Image.open(path) for path in batch_paths]
+
+		imgs_cropped = mtcnn(batch_imgs)
+		batch_paths = [path for p, path in enumerate(batch_paths) if imgs_cropped[p] is not None]
+		imgs_cropped = [img for img in imgs_cropped if img is not None]
+
+		batch_embeddings = facenet(torch.stack(imgs_cropped, dim=0).to(device))
+		for p, path in enumerate(batch_paths):
+			embeddings[path] = batch_embeddings[p].cpu().numpy()
 
 	return embeddings
 
@@ -111,7 +117,7 @@ def head_poses(img_dir, hopenet_path):
 def map_by_id(d):
 	return {
 		os.path.splitext(os.path.basename(path))[0]: v
-		for path, v in d.items()
+		for path, v in d.items() if v is not None
 	}
 
 
@@ -119,13 +125,16 @@ def map_by_id(d):
 def eval_metrics(args):
 	translations_dir = os.path.join(args.eval_dir, 'translations')
 
+	print('# detecting landmarks')
 	fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=False)
 	content_landmarks = map_by_id(fa.get_landmarks_from_directory(path=os.path.join(translations_dir, 'content')))
 	translation_landmarks = map_by_id(fa.get_landmarks_from_directory(path=os.path.join(translations_dir, 'translation')))
 
+	print('# computing face embedding')
 	style_embeddings = map_by_id(face_embeddings(img_dir=os.path.join(translations_dir, 'style')))
 	translation_embeddings = map_by_id(face_embeddings(img_dir=os.path.join(translations_dir, 'translation')))
 
+	print('# estimating head pose')
 	head_poses_content = map_by_id(head_poses(img_dir=os.path.join(translations_dir, 'content'), hopenet_path=args.hopenet_path))
 	head_poses_translation = map_by_id(head_poses(img_dir=os.path.join(translations_dir, 'translation'), hopenet_path=args.hopenet_path))
 
@@ -139,10 +148,16 @@ def eval_metrics(args):
 		}
 	}
 
+	n_brokens = 0
 	for translation_id in translation_landmarks.keys():
 		content_id, style_id = translation_id.split('-')
 
-		if style_id not in style_embeddings or translation_id not in translation_embeddings:
+		if (content_id not in content_landmarks
+			or translation_id not in translation_landmarks
+			or style_id not in style_embeddings
+			or translation_id not in translation_embeddings):
+
+			n_brokens += 1
 			continue
 
 		losses['landmarks'].append(
@@ -172,7 +187,9 @@ def eval_metrics(args):
 			'yaw': np.mean(losses['head_pose']['yaw']).item(),
 			'pitch': np.mean(losses['head_pose']['pitch']).item(),
 			'roll': np.mean(losses['head_pose']['roll']).item()
-		}
+		},
+
+		'n_brokens': n_brokens
 	}
 
 	with open(os.path.join(args.eval_dir, 'face.json'), 'w') as f:
