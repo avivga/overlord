@@ -494,7 +494,7 @@ class Model:
 			torchvision.utils.save_image(summary_img, os.path.join(out_dir, '{}.png'.format(i)))
 
 	@torch.no_grad()
-	def encode(self, imgs, classes, out_path):
+	def encode(self, imgs, classes, amortized, out_path):
 		data = dict(
 			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
 			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
@@ -513,8 +513,8 @@ class Model:
 
 		np.savez(
 			file=out_path,
-			content_codes=self.encode_content(dataset, amortized=True),
-			class_codes=self.encode_class(dataset, amortized=True),
+			content_codes=self.encode_content(dataset, amortized),
+			class_codes=self.encode_class(dataset, amortized),
 			style_codes=self.encode_style(dataset),
 			class_ids=classes
 		)
@@ -586,7 +586,7 @@ class Model:
 			if amortized:
 				batch_class_codes = self.class_encoder(batch['img'].to(self.device))
 			else:
-				batch_class_codes = self.class_embedding(batch['img_id'])
+				batch_class_codes = self.class_embedding(batch['class_id'])
 
 			class_codes.append(batch_class_codes.cpu().numpy())
 

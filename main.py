@@ -140,9 +140,13 @@ def encode(args):
 	imgs = data['img'].astype(np.float32) / 255.0
 	classes = data['class']
 
-	amortized_model_dir = os.path.join(model_dir, 'amortized')
-	model = Model.load(amortized_model_dir)
-	model.encode(imgs, classes, out_path=os.path.join(eval_dir, 'latents.npz'))
+	if args.amortized:
+		amortized_model_dir = os.path.join(model_dir, 'amortized')
+		model = Model.load(amortized_model_dir)
+		model.encode(imgs, classes, amortized=True, out_path=os.path.join(eval_dir, 'latents.npz'))
+	else:
+		model = Model.load(model_dir)
+		model.encode(imgs, classes, amortized=False, out_path=os.path.join(eval_dir, 'embeddings.npz'))
 
 
 def main():
@@ -193,6 +197,7 @@ def main():
 	encode_parser = action_parsers.add_parser('encode')
 	encode_parser.add_argument('-dn', '--data-name', type=str, required=True)
 	encode_parser.add_argument('-mn', '--model-name', type=str, required=True)
+	encode_parser.add_argument('-a', '--amortized', action='store_true')
 	encode_parser.set_defaults(func=encode)
 
 	args, extras = parser.parse_known_args()
