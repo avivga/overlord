@@ -12,7 +12,7 @@ from model import ConstantInput, ToRGB, ModulatedConv2d, FusedLeakyReLU
 
 class Generator(nn.Module):
 
-	def __init__(self, img_size, content_dim, class_dim, style_dim, style_descriptor_dim):
+	def __init__(self, img_size, content_dim, class_dim, style_dim):
 		super().__init__()
 
 		latent_dim = content_dim + class_dim + style_dim
@@ -35,8 +35,6 @@ class Generator(nn.Module):
 		self.input = ConstantInput(self.channels[4])
 		self.conv1 = StyledConv(self.channels[4], self.channels[4], 3, latent_dim, blur_kernel=blur_kernel)
 		self.to_rgb1 = ToRGB(self.channels[4], latent_dim, upsample=False)
-
-		self.style_projector = nn.Linear(in_features=style_descriptor_dim, out_features=style_dim)
 
 		self.log_size = int(math.log(img_size, 2))
 		self.num_layers = (self.log_size - 2) * 2 + 1
@@ -73,9 +71,7 @@ class Generator(nn.Module):
 
 		self.n_latent = self.log_size * 2 - 2
 
-	def forward(self, content_code, class_code, style_descriptor):
-		style_code = self.style_projector(style_descriptor)
-
+	def forward(self, content_code, class_code, style_code):
 		latent_code = torch.cat((content_code, class_code, style_code), dim=1)
 		latent_code = latent_code.unsqueeze(dim=1).repeat(1, self.n_latent, 1)
 

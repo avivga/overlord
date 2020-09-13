@@ -9,17 +9,13 @@ base_config = dict(
 		layers=[2, 7, 12, 21, 30]
 	),
 
-	style_descriptor=dict(
-		layers=[7, 30],
-		dim=2 * (128 + 512)
-	),
-
 	train=dict(
 		batch_size=16,
 		n_epochs=100,
 
 		learning_rate=dict(
 			latent=1e-2,
+			encoder=1e-4,
 			generator=1e-3,
 			min=1e-5
 		),

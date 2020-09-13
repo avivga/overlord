@@ -42,17 +42,16 @@ class Model:
 			img_size=config['img_shape'][0],
 			content_dim=config['content_dim'],
 			class_dim=config['class_dim'],
-			style_dim=config['style_dim'],
-			style_descriptor_dim=config['style_descriptor']['dim']
+			style_dim=config['style_dim']
 		)
 
 		self.discriminator = Discriminator(size=config['img_shape'][0])
 		self.content_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['content_dim'])
 		self.class_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['class_dim'])
+		self.style_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['style_dim'])
 
 		self.vgg_features = VGGFeatures()
 		self.perceptual_loss = VGGDistance(self.vgg_features, config['perceptual_loss']['layers'])
-		self.style_descriptor = VGGStyle(self.vgg_features, config['style_descriptor']['layers'])
 
 		self.rs = np.random.RandomState(seed=1337)
 
@@ -71,6 +70,7 @@ class Model:
 
 		model.content_encoder.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'content_encoder.pth')))
 		model.class_encoder.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'class_encoder.pth')))
+		model.style_encoder.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'style_encoder.pth')))
 
 		return model
 
@@ -89,6 +89,7 @@ class Model:
 
 		torch.save(self.content_encoder.state_dict(), os.path.join(checkpoint_dir, 'content_encoder.pth'))
 		torch.save(self.class_encoder.state_dict(), os.path.join(checkpoint_dir, 'class_encoder.pth'))
+		torch.save(self.style_encoder.state_dict(), os.path.join(checkpoint_dir, 'style_encoder.pth'))
 
 	def train(self, imgs, classes, model_dir, tensorboard_dir):
 		data = dict(
@@ -113,6 +114,10 @@ class Model:
 				'lr': self.config['train']['learning_rate']['latent']
 			},
 			{
+				'params': self.style_encoder.parameters(),
+				'lr': self.config['train']['learning_rate']['encoder']
+			},
+			{
 				'params': self.generator.parameters(),
 				'lr': self.config['train']['learning_rate']['generator']
 			}
@@ -124,11 +129,13 @@ class Model:
 			eta_min=self.config['train']['learning_rate']['min']
 		)
 
+		self.style_encoder.to(self.device)
 		self.generator.to(self.device)
 		self.vgg_features.to(self.device)
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['train']['n_epochs']):
+			self.style_encoder.train()
 			self.generator.train()
 
 			pbar = tqdm(iterable=data_loader)
@@ -207,6 +214,7 @@ class Model:
 		self.discriminator.to(self.device)
 		self.content_encoder.to(self.device)
 		self.class_encoder.to(self.device)
+		self.style_encoder.to(self.device)
 		self.vgg_features.to(self.device)
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
@@ -272,9 +280,6 @@ class Model:
 		summary.close()
 
 	def train_latent_generator(self, batch):
-		with torch.no_grad():
-			style_descriptor = self.style_descriptor(batch['img_augmented'])
-
 		if self.config['content_std'] != 0:
 			noise = torch.zeros_like(batch['content_code'])
 			noise.normal_(mean=0, std=self.config['content_std'])
@@ -283,7 +288,9 @@ class Model:
 		else:
 			content_code_regularized = batch['content_code']
 
-		img_reconstructed = self.generator(content_code_regularized, batch['class_code'], style_descriptor)
+		style_code = self.style_encoder(batch['img_augmented'])
+
+		img_reconstructed = self.generator(content_code_regularized, batch['class_code'], style_code)
 		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
 
 		loss_content_decay = torch.sum(batch['content_code'] ** 2, dim=1).mean()
@@ -294,12 +301,13 @@ class Model:
 		}
 
 	def train_amortized_generator(self, batch):
-		with torch.no_grad():
-			style_descriptor = self.style_descriptor(batch['img'])
-
 		content_code = self.content_encoder(batch['img'])
 		class_code = self.class_encoder(batch['img'])
-		img_reconstructed = self.generator(content_code, class_code, style_descriptor)
+
+		with torch.no_grad():
+			style_code = self.style_encoder(batch['img'])
+
+		img_reconstructed = self.generator(content_code, class_code, style_code)
 		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
 
 		loss_content = torch.mean((content_code - batch['content_code']) ** 2, dim=1).mean()
@@ -318,8 +326,8 @@ class Model:
 		with torch.no_grad():
 			content_code = self.content_encoder(batch['img'])
 			class_code = self.class_encoder(batch['img'])
-			style_descriptor = self.style_descriptor(batch['img'])
-			img_reconstructed = self.generator(content_code, class_code, style_descriptor)
+			style_code = self.style_encoder(batch['img'])
+			img_reconstructed = self.generator(content_code, class_code, style_code)
 
 		batch['img'].requires_grad_()  # for gradient penalty
 		discriminator_fake = self.discriminator(img_reconstructed)
@@ -369,10 +377,12 @@ class Model:
 
 		self.content_encoder.eval()
 		self.class_encoder.eval()
+		self.style_encoder.eval()
 		self.generator.eval()
 
 		self.content_encoder.to(self.device)
 		self.class_encoder.to(self.device)
+		self.style_encoder.to(self.device)
 		self.generator.to(self.device)
 		self.vgg_features.to(self.device)
 
@@ -400,9 +410,9 @@ class Model:
 
 				content_codes = self.content_encoder(content_imgs.to(self.device))
 				class_codes = self.class_encoder(style_imgs.to(self.device))
-				style_descriptors = self.style_descriptor(style_imgs.to(self.device))
+				style_codes = self.style_encoder(style_imgs.to(self.device))
 
-				translated_imgs = self.generator(content_codes, class_codes, style_descriptors).cpu()
+				translated_imgs = self.generator(content_codes, class_codes, style_codes).cpu()
 				for i in range(n_translations_per_image):
 					torchvision.utils.save_image(
 						content_imgs[i],
@@ -429,10 +439,12 @@ class Model:
 
 		self.content_encoder.eval()
 		self.class_encoder.eval()
+		self.style_encoder.eval()
 		self.generator.eval()
 
 		self.content_encoder.to(self.device)
 		self.class_encoder.to(self.device)
+		self.style_encoder.to(self.device)
 		self.generator.to(self.device)
 		self.vgg_features.to(self.device)
 
@@ -452,9 +464,9 @@ class Model:
 
 			content_codes = self.content_encoder(content_imgs.to(self.device))
 			class_codes = self.class_encoder(style_imgs.to(self.device))
-			style_descriptors = self.style_descriptor(style_imgs.to(self.device))
+			style_codes = self.style_encoder(style_imgs.to(self.device))
 
-			translated_imgs = self.generator(content_codes, class_codes, style_descriptors).cpu()
+			translated_imgs = self.generator(content_codes, class_codes, style_codes).cpu()
 			for i in range(n_translations_per_image):
 				torchvision.utils.save_image(
 					content_imgs[i],
@@ -482,10 +494,12 @@ class Model:
 
 		self.content_encoder.eval()
 		self.class_encoder.eval()
+		self.style_encoder.eval()
 		self.generator.eval()
 
 		self.content_encoder.to(self.device)
 		self.class_encoder.to(self.device)
+		self.style_encoder.to(self.device)
 		self.generator.to(self.device)
 		self.vgg_features.to(self.device)
 
@@ -505,9 +519,11 @@ class Model:
 
 		self.content_encoder.eval()
 		self.class_encoder.eval()
+		self.style_encoder.eval()
 
 		self.content_encoder.to(self.device)
 		self.class_encoder.to(self.device)
+		self.style_encoder.to(self.device)
 		self.generator.to(self.device)
 		self.vgg_features.to(self.device)
 
@@ -523,6 +539,7 @@ class Model:
 	def generate_samples(self, dataset, n_samples=10, randomized=False, amortized=False):
 		self.content_encoder.eval()
 		self.class_encoder.eval()
+		self.style_encoder.eval()
 		self.generator.eval()
 
 		random = self.rs if randomized else np.random.RandomState(seed=0)
@@ -538,7 +555,7 @@ class Model:
 			samples['class_code'] = self.class_embedding(samples['class_id'])
 
 		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
-		samples['style_descriptor'] = self.style_descriptor(samples['img'])
+		samples['style_code'] = self.style_encoder(samples['img'])
 
 		blank = torch.ones_like(samples['img'][0])
 		summary = [torch.cat([blank] + list(samples['img']), dim=2)]
@@ -549,7 +566,7 @@ class Model:
 				converted_img = self.generator(
 					samples['content_code'][[j]],
 					samples['class_code'][[i]],
-					samples['style_descriptor'][[i]]
+					samples['style_code'][[i]]
 				)
 
 				converted_imgs.append(converted_img[0])
@@ -595,11 +612,12 @@ class Model:
 
 	@torch.no_grad()
 	def encode_style(self, dataset):
+		self.style_encoder.eval()
+
 		style_codes = []
 		data_loader = DataLoader(dataset, batch_size=64, shuffle=False, pin_memory=True, drop_last=False)
 		for batch in data_loader:
-			batch_style_descriptors = self.style_descriptor(batch['img'].to(self.device))
-			batch_style_codes = self.generator.style_projector(batch_style_descriptors)
+			batch_style_codes = self.style_encoder(batch['img'].to(self.device))
 			style_codes.append(batch_style_codes.cpu().numpy())
 
 		style_codes = np.concatenate(style_codes, axis=0)
