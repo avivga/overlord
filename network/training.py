@@ -35,10 +35,10 @@ class LatentModel(nn.Module):
 		nn.init.uniform_(self.content_embedding.weight, a=-0.05, b=0.05)
 		nn.init.uniform_(self.class_embedding.weight, a=-0.05, b=0.05)
 
-		self.style_encoder = Encoder(img_size=config['train']['img_size'], code_dim=config['style_dim'])
+		self.style_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['style_dim'])
 
 		self.generator = Generator(
-			img_size=config['train']['img_size'],
+			img_size=config['img_shape'][0],
 			content_dim=config['content_dim'],
 			class_dim=config['class_dim'],
 			style_dim=config['style_dim']
@@ -50,18 +50,18 @@ class AmortizedModel(nn.Module):
 	def __init__(self, config):
 		super().__init__()
 
-		self.content_encoder = Encoder(img_size=config['amortize']['img_size'], code_dim=config['content_dim'])
-		self.class_encoder = Encoder(img_size=config['amortize']['img_size'], code_dim=config['class_dim'])
-		self.style_encoder = Encoder(img_size=config['amortize']['img_size'], code_dim=config['style_dim'])
+		self.content_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['content_dim'])
+		self.class_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['class_dim'])
+		self.style_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['style_dim'])
 
 		self.generator = Generator(
-			img_size=config['amortize']['img_size'],
+			img_size=config['img_shape'][0],
 			content_dim=config['content_dim'],
 			class_dim=config['class_dim'],
 			style_dim=config['style_dim']
 		)
 
-		self.discriminator = Discriminator(size=config['amortize']['img_size'])
+		self.discriminator = Discriminator(size=config['img_shape'][0])
 
 
 class Model:
@@ -73,7 +73,7 @@ class Model:
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 		self.latent_model = None
-		self.amorized_model = None
+		self.amortized_model = None
 
 		self.vgg_features = VGGFeatures()
 		self.perceptual_loss = VGGDistance(self.vgg_features, config['perceptual_loss']['layers'])
@@ -92,8 +92,8 @@ class Model:
 			model.latent_model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'latent.pth')))
 
 		if os.path.exists(os.path.join(checkpoint_dir, 'amortized.pth')):
-			model.amorized_model = AmortizedModel(config)
-			model.amorized_model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'amortized.pth')))
+			model.amortized_model = AmortizedModel(config)
+			model.amortized_model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'amortized.pth')))
 
 		return model
 
@@ -107,8 +107,8 @@ class Model:
 		if self.latent_model:
 			torch.save(self.latent_model.state_dict(), os.path.join(checkpoint_dir, 'latent.pth'))
 
-		if self.amorized_model:
-			torch.save(self.amorized_model.state_dict(), os.path.join(checkpoint_dir, 'amortized.pth'))
+		if self.amortized_model:
+			torch.save(self.amortized_model.state_dict(), os.path.join(checkpoint_dir, 'amortized.pth'))
 
 	def train(self, imgs, classes, model_dir, tensorboard_dir):
 		self.latent_model = LatentModel(self.config)
@@ -200,12 +200,15 @@ class Model:
 
 		summary.close()
 
-	def amortize(self, imgs, imgs_lr, classes, model_dir, tensorboard_dir):
-		self.amorized_model = AmortizedModel(self.config)
+	def amortize(self, imgs, classes, model_dir, tensorboard_dir):
+		self.amortized_model = AmortizedModel(self.config)
+		self.amortized_model.style_encoder.load_state_dict(self.latent_model.style_encoder.state_dict())
+		self.amortized_model.generator.load_state_dict(self.latent_model.generator.state_dict())
+
+		self.warmup(imgs, classes, model_dir, tensorboard_dir)
 
 		data = dict(
 			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
-			img_lr=torch.from_numpy(imgs_lr).permute(0, 3, 1, 2),
 			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
 			class_id=torch.from_numpy(classes.astype(np.int64))
 		)
@@ -218,10 +221,9 @@ class Model:
 
 		generator_optimizer = Adam(
 			params=itertools.chain(
-				self.amorized_model.content_encoder.parameters(),
-				self.amorized_model.class_encoder.parameters(),
-				self.amorized_model.style_encoder.parameters(),
-				self.amorized_model.generator.parameters()
+				self.amortized_model.content_encoder.parameters(),
+				self.amortized_model.class_encoder.parameters(),
+				self.amortized_model.generator.parameters()
 			),
 
 			lr=self.config['amortize']['learning_rate']['generator'],
@@ -229,19 +231,17 @@ class Model:
 		)
 
 		discriminator_optimizer = Adam(
-			params=self.amorized_model.discriminator.parameters(),
+			params=self.amortized_model.discriminator.parameters(),
 			lr=self.config['amortize']['learning_rate']['discriminator'],
 			betas=(0.5, 0.999)
 		)
 
-		self.amorized_model.to(self.device)
-		self.latent_model.style_encoder.to(self.device)
+		self.amortized_model.to(self.device)
 		self.vgg_features.to(self.device)
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
 		for epoch in range(self.config['amortize']['n_epochs']):
-			self.amorized_model.train()
-			warmup = (epoch < self.config['amortize']['n_epochs_warmup'])
+			self.amortized_model.train()
 
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
@@ -249,20 +249,19 @@ class Model:
 				batch['class_code'] = self.latent_model.class_embedding(batch['class_id'])
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
-				if not warmup:
-					losses_discriminator = self.train_discriminator(batch)
-					loss_discriminator = (
-							losses_discriminator['fake']
-							+ losses_discriminator['real']
-							+ losses_discriminator['gradient_penalty']
-					)
+				losses_discriminator = self.train_discriminator(batch)
+				loss_discriminator = (
+					losses_discriminator['fake']
+					+ losses_discriminator['real']
+					+ losses_discriminator['gradient_penalty']
+				)
 
-					generator_optimizer.zero_grad()
-					discriminator_optimizer.zero_grad()
-					loss_discriminator.backward()
-					discriminator_optimizer.step()
+				generator_optimizer.zero_grad()
+				discriminator_optimizer.zero_grad()
+				loss_discriminator.backward()
+				discriminator_optimizer.step()
 
-				losses_generator = self.train_amortized_generator(batch, adversarial=(not warmup))
+				losses_generator = self.train_amortized_generator(batch)
 				loss_generator = 0
 				for term, loss in losses_generator.items():
 					loss_generator += self.config['amortize']['loss_weights'][term] * loss
@@ -273,13 +272,11 @@ class Model:
 				generator_optimizer.step()
 
 				pbar.set_description_str('epoch #{}'.format(epoch))
-				pbar.set_postfix(gen_loss=loss_generator.item())
+				pbar.set_postfix(gen_loss=loss_generator.item(), disc_loss=loss_discriminator.item())
 
 			pbar.close()
 
-			if not warmup:
-				summary.add_scalar(tag='loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
-
+			summary.add_scalar(tag='loss/discriminator', scalar_value=loss_discriminator.item(), global_step=epoch)
 			summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
 
 			for term, loss in losses_generator.items():
@@ -296,6 +293,68 @@ class Model:
 				score_train, score_test = self.classification_score(X=content_codes, y=classes)
 				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
 				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
+
+			self.save(model_dir)
+
+		summary.close()
+
+	def warmup(self, imgs, classes, model_dir, tensorboard_dir):
+		data = dict(
+			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
+			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
+			class_id=torch.from_numpy(classes.astype(np.int64))
+		)
+
+		dataset = NamedTensorDataset(data)
+		data_loader = DataLoader(
+			dataset, batch_size=self.config['warmup']['batch_size'],
+			shuffle=True, pin_memory=True, drop_last=True
+		)
+
+		optimizer = Adam(
+			params=itertools.chain(
+				self.amortized_model.content_encoder.parameters(),
+				self.amortized_model.class_encoder.parameters(),
+			),
+
+			lr=self.config['warmup']['learning_rate']['encoder'],
+			betas=(0.5, 0.999)
+		)
+
+		self.amortized_model.to(self.device)
+
+		summary = SummaryWriter(log_dir=tensorboard_dir)
+		for epoch in range(self.config['warmup']['n_epochs']):
+			self.amortized_model.train()
+
+			pbar = tqdm(iterable=data_loader)
+			for batch in pbar:
+				batch['content_code'] = self.latent_model.content_embedding(batch['img_id'])
+				batch['class_code'] = self.latent_model.class_embedding(batch['class_id'])
+				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
+
+				losses_encoders = self.train_encoders(batch)
+				loss_encoders = 0
+				for term, loss in losses_encoders.items():
+					loss_encoders += self.config['warmup']['loss_weights'][term] * loss
+
+				optimizer.zero_grad()
+				loss_encoders.backward()
+				optimizer.step()
+
+				pbar.set_description_str('epoch #{}'.format(epoch))
+				pbar.set_postfix(gen_loss=loss_encoders.item())
+
+			pbar.close()
+
+			for term, loss in losses_encoders.items():
+				summary.add_scalar(tag='loss/warmup/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
+
+			samples_fixed = self.generate_samples(dataset, randomized=False, amortized=True)
+			samples_random = self.generate_samples(dataset, randomized=True, amortized=True)
+
+			summary.add_image(tag='warmup-fixed', img_tensor=samples_fixed, global_step=epoch)
+			summary.add_image(tag='warmup-random', img_tensor=samples_random, global_step=epoch)
 
 			self.save(model_dir)
 
@@ -322,44 +381,49 @@ class Model:
 			'content_decay': loss_content_decay
 		}
 
-	def train_amortized_generator(self, batch, adversarial):
-		content_code = self.amorized_model.content_encoder(batch['img'])
-		class_code = self.amorized_model.class_encoder(batch['img'])
-		style_code = self.amorized_model.style_encoder(batch['img'])
-
-		img_reconstructed = self.amorized_model.generator(content_code, class_code, style_code)
-		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
-
-		with torch.no_grad():
-			batch['style_code'] = self.latent_model.style_encoder(batch['img_lr'])
+	def train_encoders(self, batch):
+		content_code = self.amortized_model.content_encoder(batch['img'])
+		class_code = self.amortized_model.class_encoder(batch['img'])
 
 		loss_content = torch.mean((content_code - batch['content_code']) ** 2, dim=1).mean()
 		loss_class = torch.mean((class_code - batch['class_code']) ** 2, dim=1).mean()
-		loss_style = torch.mean((style_code - batch['style_code']) ** 2, dim=1).mean()
 
-		losses = {
-			'reconstruction': loss_reconstruction,
-			'latent': loss_content + loss_class + loss_style
+		return {
+			'latent': loss_content + loss_class
 		}
 
-		if adversarial:
-			discriminator_fake = self.amorized_model.discriminator(img_reconstructed)
-			loss_adversarial = self.adv_loss(discriminator_fake, 1)
+	def train_amortized_generator(self, batch):
+		content_code = self.amortized_model.content_encoder(batch['img'])
+		class_code = self.amortized_model.class_encoder(batch['img'])
 
-			losses['adversarial'] = loss_adversarial
+		with torch.no_grad():
+			style_code = self.amortized_model.style_encoder(batch['img'])
 
-		return losses
+		img_reconstructed = self.amortized_model.generator(content_code, class_code, style_code)
+		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
+
+		loss_content = torch.mean((content_code - batch['content_code']) ** 2, dim=1).mean()
+		loss_class = torch.mean((class_code - batch['class_code']) ** 2, dim=1).mean()
+
+		discriminator_fake = self.amortized_model.discriminator(img_reconstructed)
+		loss_adversarial = self.adv_loss(discriminator_fake, 1)
+
+		return {
+			'reconstruction': loss_reconstruction,
+			'latent': loss_content + loss_class,
+			'adversarial': loss_adversarial
+		}
 
 	def train_discriminator(self, batch):
 		with torch.no_grad():
-			content_code = self.amorized_model.content_encoder(batch['img'])
-			class_code = self.amorized_model.class_encoder(batch['img'])
-			style_code = self.amorized_model.style_encoder(batch['img'])
-			img_reconstructed = self.amorized_model.generator(content_code, class_code, style_code)
+			content_code = self.amortized_model.content_encoder(batch['img'])
+			class_code = self.amortized_model.class_encoder(batch['img'])
+			style_code = self.amortized_model.style_encoder(batch['img'])
+			img_reconstructed = self.amortized_model.generator(content_code, class_code, style_code)
 
 		batch['img'].requires_grad_()  # for gradient penalty
-		discriminator_fake = self.amorized_model.discriminator(img_reconstructed)
-		discriminator_real = self.amorized_model.discriminator(batch['img'])
+		discriminator_fake = self.amortized_model.discriminator(img_reconstructed)
+		discriminator_real = self.amortized_model.discriminator(batch['img'])
 
 		loss_fake = self.adv_loss(discriminator_fake, 0)
 		loss_real = self.adv_loss(discriminator_real, 1)
@@ -403,8 +467,8 @@ class Model:
 			for class_id in unique_classes
 		}
 
-		self.amorized_model.to(self.device)
-		self.amorized_model.eval()
+		self.amortized_model.to(self.device)
+		self.amortized_model.eval()
 
 		rs = np.random.RandomState(seed=1337)
 		dataset = NamedTensorDataset(data)
@@ -428,11 +492,11 @@ class Model:
 				content_imgs = torch.stack([dataset[content_idx]['img']] * n_translations_per_image, dim=0)
 				style_imgs = dataset[style_idxs]['img']
 
-				content_codes = self.amorized_model.content_encoder(content_imgs.to(self.device))
-				class_codes = self.amorized_model.class_encoder(style_imgs.to(self.device))
-				style_codes = self.amorized_model.style_encoder(style_imgs.to(self.device))
+				content_codes = self.amortized_model.content_encoder(content_imgs.to(self.device))
+				class_codes = self.amortized_model.class_encoder(style_imgs.to(self.device))
+				style_codes = self.amortized_model.style_encoder(style_imgs.to(self.device))
 
-				translated_imgs = self.amorized_model.generator(content_codes, class_codes, style_codes).cpu()
+				translated_imgs = self.amortized_model.generator(content_codes, class_codes, style_codes).cpu()
 				for i in range(n_translations_per_image):
 					torchvision.utils.save_image(
 						content_imgs[i],
@@ -457,8 +521,8 @@ class Model:
 			class_id=torch.from_numpy(classes.astype(np.int64))
 		)
 
-		self.amorized_model.to(self.device)
-		self.amorized_model.eval()
+		self.amortized_model.to(self.device)
+		self.amortized_model.eval()
 
 		rs = np.random.RandomState(seed=1337)
 		dataset = NamedTensorDataset(data)
@@ -474,11 +538,11 @@ class Model:
 			content_imgs = torch.stack([dataset[content_idx]['img']] * n_translations_per_image, dim=0)
 			style_imgs = dataset[style_idxs]['img']
 
-			content_codes = self.amorized_model.content_encoder(content_imgs.to(self.device))
-			class_codes = self.amorized_model.class_encoder(style_imgs.to(self.device))
-			style_codes = self.amorized_model.style_encoder(style_imgs.to(self.device))
+			content_codes = self.amortized_model.content_encoder(content_imgs.to(self.device))
+			class_codes = self.amortized_model.class_encoder(style_imgs.to(self.device))
+			style_codes = self.amortized_model.style_encoder(style_imgs.to(self.device))
 
-			translated_imgs = self.amorized_model.generator(content_codes, class_codes, style_codes).cpu()
+			translated_imgs = self.amortized_model.generator(content_codes, class_codes, style_codes).cpu()
 			for i in range(n_translations_per_image):
 				torchvision.utils.save_image(
 					content_imgs[i],
@@ -503,7 +567,7 @@ class Model:
 		)
 
 		dataset = NamedTensorDataset(data)
-		self.amorized_model.to(self.device)
+		self.amortized_model.to(self.device)
 
 		for i in range(n_summaries):
 			summary_img = self.generate_samples(dataset, summary_size, randomized=True, amortized=True)
@@ -520,7 +584,7 @@ class Model:
 		dataset = NamedTensorDataset(data)
 
 		if amortized:
-			self.amorized_model.to(self.device)
+			self.amortized_model.to(self.device)
 		else:
 			self.latent_model.style_encoder.to(self.device)
 			self.latent_model.generator.to(self.device)
@@ -540,11 +604,11 @@ class Model:
 		samples = dataset[img_idx]
 
 		if amortized:
-			self.amorized_model.eval()
+			self.amortized_model.eval()
 
-			samples['content_code'] = self.amorized_model.content_encoder(samples['img'].to(self.device))
-			samples['class_code'] = self.amorized_model.class_encoder(samples['img'].to(self.device))
-			samples['style_code'] = self.amorized_model.style_encoder(samples['img'].to(self.device))
+			samples['content_code'] = self.amortized_model.content_encoder(samples['img'].to(self.device))
+			samples['class_code'] = self.amortized_model.class_encoder(samples['img'].to(self.device))
+			samples['style_code'] = self.amortized_model.style_encoder(samples['img'].to(self.device))
 
 		else:
 			self.latent_model.eval()
@@ -561,7 +625,7 @@ class Model:
 			converted_imgs = [samples['img'][i]]
 
 			for j in range(n_samples):
-				generator = self.amorized_model.generator if amortized else self.latent_model.generator
+				generator = self.amortized_model.generator if amortized else self.latent_model.generator
 				converted_img = generator(samples['content_code'][[j]], samples['class_code'][[i]], samples['style_code'][[i]])
 				converted_imgs.append(converted_img[0])
 
@@ -573,7 +637,7 @@ class Model:
 	@torch.no_grad()
 	def encode_content(self, dataset, amortized=False):
 		if amortized:
-			self.amorized_model.eval()
+			self.amortized_model.eval()
 		else:
 			self.latent_model.eval()
 
@@ -581,7 +645,7 @@ class Model:
 		data_loader = DataLoader(dataset, batch_size=64, shuffle=False, pin_memory=True, drop_last=False)
 		for batch in data_loader:
 			if amortized:
-				batch_content_codes = self.amorized_model.content_encoder(batch['img'].to(self.device))
+				batch_content_codes = self.amortized_model.content_encoder(batch['img'].to(self.device))
 			else:
 				batch_content_codes = self.latent_model.content_embedding(batch['img_id'])
 
@@ -593,7 +657,7 @@ class Model:
 	@torch.no_grad()
 	def encode_class(self, dataset, amortized=False):
 		if amortized:
-			self.amorized_model.eval()
+			self.amortized_model.eval()
 		else:
 			self.latent_model.eval()
 
@@ -601,7 +665,7 @@ class Model:
 		data_loader = DataLoader(dataset, batch_size=64, shuffle=False, pin_memory=True, drop_last=False)
 		for batch in data_loader:
 			if amortized:
-				batch_class_codes = self.amorized_model.class_encoder(batch['img'].to(self.device))
+				batch_class_codes = self.amortized_model.class_encoder(batch['img'].to(self.device))
 			else:
 				batch_class_codes = self.latent_model.class_embedding(batch['class_id'])
 
@@ -612,7 +676,7 @@ class Model:
 
 	@torch.no_grad()
 	def encode_style(self, dataset, amortized=False):
-		style_encoder = self.amorized_model.style_encoder if amortized else self.latent_model.style_encoder
+		style_encoder = self.amortized_model.style_encoder if amortized else self.latent_model.style_encoder
 		style_encoder.eval()
 
 		style_codes = []

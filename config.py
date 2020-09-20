@@ -10,9 +10,7 @@ base_config = dict(
 	),
 
 	train=dict(
-		img_size=128,
-
-		batch_size=16,
+		batch_size=8,
 		n_epochs=200,
 
 		learning_rate=dict(
@@ -28,12 +26,22 @@ base_config = dict(
 		)
 	),
 
-	amortize=dict(
-		img_size=256,
+	warmup=dict(
+		batch_size=8,
+		n_epochs=20,
 
+		learning_rate=dict(
+			encoder=1e-3
+		),
+
+		loss_weights=dict(
+			latent=1
+		)
+	),
+
+	amortize=dict(
 		batch_size=4,
 		n_epochs=100,
-		n_epochs_warmup=10,
 
 		learning_rate=dict(
 			generator=1e-4,
@@ -42,7 +50,7 @@ base_config = dict(
 
 		loss_weights=dict(
 			reconstruction=1,
-			latent=100,
+			latent=10,
 			adversarial=1
 		)
 	)

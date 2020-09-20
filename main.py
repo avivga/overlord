@@ -80,15 +80,12 @@ def amortize(args):
 	imgs = data['img'].astype(np.float32) / 255.0
 	classes = data['class']
 
-	data = np.load(assets.get_preprocess_file_path(args.lr_data_name))
-	imgs_lr = data['img'].astype(np.float32) / 255.0
-
 	amortized_tensorboard_dir = os.path.join(tensorboard_dir, 'amortized')
 	if not os.path.exists(amortized_tensorboard_dir):
 		os.mkdir(amortized_tensorboard_dir)
 
 	model = Model.load(model_dir)
-	model.amortize(imgs, imgs_lr, classes, model_dir, amortized_tensorboard_dir)
+	model.amortize(imgs, classes, model_dir, amortized_tensorboard_dir)
 
 
 def translate(args):
@@ -171,7 +168,6 @@ def main():
 
 	amortize_parser = action_parsers.add_parser('amortize')
 	amortize_parser.add_argument('-dn', '--data-name', type=str, required=True)
-	amortize_parser.add_argument('-lrdn', '--lr-data-name', type=str, required=True)
 	amortize_parser.add_argument('-mn', '--model-name', type=str, required=True)
 	amortize_parser.set_defaults(func=amortize)
 
