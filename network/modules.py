@@ -261,26 +261,3 @@ class VGGDistance(nn.Module):
 			loss = loss + layer_loss
 
 		return loss.mean()
-
-
-class VGGStyle(nn.Module):
-
-	def __init__(self, vgg_features, layer_ids):
-		super().__init__()
-
-		self.vgg_features = vgg_features
-		self.layer_ids = layer_ids
-
-	def forward(self, x):
-		features = self.vgg_features(x, self.layer_ids)
-
-		means = []
-		stds = []
-		for i in range(len(self.layer_ids)):
-			means_i = torch.mean(features[i], dim=[2, 3])
-			stds_i = torch.std(features[i], dim=[2, 3])
-
-			means.append(means_i)
-			stds.append(stds_i)
-
-		return torch.cat(means + stds, dim=1)

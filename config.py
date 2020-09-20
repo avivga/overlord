@@ -1,7 +1,7 @@
 base_config = dict(
 	content_dim=64,
-	class_dim=512,
-	style_dim=64,
+	class_dim=64,
+	style_dim=256,
 
 	content_std=0,
 
@@ -10,6 +10,8 @@ base_config = dict(
 	),
 
 	train=dict(
+		img_size=128,
+
 		batch_size=16,
 		n_epochs=200,
 
@@ -22,13 +24,16 @@ base_config = dict(
 
 		loss_weights=dict(
 			reconstruction=1,
-			content_decay=0.001
+			content_decay=0.01
 		)
 	),
 
 	amortize=dict(
-		batch_size=16,
-		n_epochs=200,
+		img_size=256,
+
+		batch_size=4,
+		n_epochs=100,
+		n_epochs_warmup=10,
 
 		learning_rate=dict(
 			generator=1e-4,
@@ -37,7 +42,7 @@ base_config = dict(
 
 		loss_weights=dict(
 			reconstruction=1,
-			latent=10,
+			latent=100,
 			adversarial=1
 		)
 	)
