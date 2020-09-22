@@ -10,7 +10,7 @@ base_config = dict(
 	),
 
 	train=dict(
-		batch_size=8,
+		batch_size=16,
 		n_epochs=200,
 
 		learning_rate=dict(
@@ -27,11 +27,11 @@ base_config = dict(
 	),
 
 	warmup=dict(
-		batch_size=8,
+		batch_size=16,
 		n_epochs=20,
 
 		learning_rate=dict(
-			encoder=1e-3
+			encoder=1e-4
 		),
 
 		loss_weights=dict(
@@ -40,7 +40,7 @@ base_config = dict(
 	),
 
 	amortize=dict(
-		batch_size=4,
+		batch_size=8,
 		n_epochs=100,
 
 		learning_rate=dict(

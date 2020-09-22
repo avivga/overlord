@@ -202,9 +202,6 @@ class Model:
 
 	def amortize(self, imgs, classes, model_dir, tensorboard_dir):
 		self.amortized_model = AmortizedModel(self.config)
-		self.amortized_model.style_encoder.load_state_dict(self.latent_model.style_encoder.state_dict())
-		self.amortized_model.generator.load_state_dict(self.latent_model.generator.state_dict())
-
 		self.warmup(imgs, classes, model_dir, tensorboard_dir)
 
 		data = dict(
@@ -294,11 +291,14 @@ class Model:
 				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
 				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
 
-			self.save(model_dir)
+			self.save(os.path.join(model_dir, '{:03d}'.format(epoch)))
 
 		summary.close()
 
 	def warmup(self, imgs, classes, model_dir, tensorboard_dir):
+		self.amortized_model.style_encoder.load_state_dict(self.latent_model.style_encoder.state_dict())
+		self.amortized_model.generator.load_state_dict(self.latent_model.generator.state_dict())
+
 		data = dict(
 			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
 			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
