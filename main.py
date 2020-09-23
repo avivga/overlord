@@ -100,8 +100,7 @@ def translate(args):
 	imgs = data['img'].astype(np.float32) / 255.0
 	classes = data['class']
 
-	amortized_model_dir = os.path.join(model_dir, 'amortized')
-	model = Model.load(amortized_model_dir)
+	model = Model.load(model_dir)
 
 	if args.full:
 		model.translate_full(imgs, classes, args.n_translations_per_image, out_dir)
@@ -122,8 +121,7 @@ def summary(args):
 	imgs = data['img'].astype(np.float32) / 255.0
 	classes = data['class']
 
-	amortized_model_dir = os.path.join(model_dir, 'amortized')
-	model = Model.load(amortized_model_dir)
+	model = Model.load(model_dir)
 	model.summary(imgs, classes, args.n_summaries, args.summary_size, out_dir)
 
 
