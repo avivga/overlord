@@ -118,35 +118,6 @@ class Encoder(nn.Module):
 		return self.main(img).view(batch_size, -1)
 
 
-class ConditionalDiscriminator(nn.Module):
-
-	def __init__(self, img_size, n_classes, max_conv_dim=256):
-		super().__init__()
-
-		dim_in = 2**14 // img_size
-		blocks = []
-		blocks += [nn.Conv2d(3, dim_in, 3, 1, 1)]
-
-		repeat_num = int(np.log2(img_size)) - 2
-		for _ in range(repeat_num):
-			dim_out = min(dim_in*2, max_conv_dim)
-			blocks += [ResBlk(dim_in, dim_out, downsample=True)]
-			dim_in = dim_out
-
-		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, dim_out, 4, 1, 0)]
-		blocks += [nn.LeakyReLU(0.2)]
-		blocks += [nn.Conv2d(dim_out, n_classes, 1, 1, 0)]
-		self.main = nn.Sequential(*blocks)
-
-	def forward(self, x, y):
-		out = self.main(x)
-		out = out.view(out.size(0), -1)  # (batch, num_domains)
-		idx = torch.LongTensor(range(y.size(0))).to(y.device)
-		out = out[idx, y]  # (batch)
-		return out
-
-
 class StyledConv(nn.Module):
 
 	def __init__(self, in_channel, out_channel, kernel_size, style_dim, upsample=False, blur_kernel=[1, 3, 3, 1], demodulate=True):
