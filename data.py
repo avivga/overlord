@@ -195,27 +195,6 @@ class Cub(DataSet):
 		args = parser.parse_args(extras)
 		self.__dict__.update(vars(args))
 
-		self.categories = [
-			'Ani Redstart', 'Geococcyx', 'Pipit',
-			'Albatross', 'Auklet Guillemot', 'Ani Blackbird Grackle Starling',
-			'Bunting', 'Catbird Chat', 'Cormorant', 'Cowbird', 'Crow', 'Cuckoo',
-			'Finch', 'Flycatcher Pewee Sayornis', 'Frigatebird', 'Fulmar', 'Goldfinch',
-			'Grebe', 'Grosbeak Cardinal', 'Gull Kittiwake', 'Hummingbird', 'Jaeger', 'Jay',
-			'Kingbird Kingfisher', 'Mallard Gadwall Loon', 'Merganser', 'Oriole Meadowlark',
-			'Pelican', 'Puffin', 'Raven', 'Shrike', 'Sparrow Bobolink Junco Lark', 'Swallow',
-			'Tanager', 'Tern', 'Towhee', 'Thrasher Mockingbird', 'Vireo', 'Violetear',
-			'Warbler Widow Creeper Ovenbird Will', 'Waterthrush', 'Waxwing', 'Woodpecker Flicker Nuthatch',
-			'Wren', 'Yellowthroat', 'Nighthawk', 'Nutcracker',
-		]
-
-	def find_category(self, img_name):
-		for i, class_keys in enumerate(self.categories):
-			for k in class_keys.split():
-				if k in img_name.split('_'):
-					return i
-
-		raise Exception('no associated class')
-
 	def read(self):
 		data = scipy.io.loadmat(os.path.join(self._base_dir, 'from_cmr', 'data', '{}_cub_cleaned.mat'.format(self.split)), struct_as_record=False, squeeze_me=True)
 
@@ -252,7 +231,11 @@ class Cub(DataSet):
 			img_cropped = img[y1:y2, x1:x2]
 			imgs.append(cv2.resize(img_cropped, dsize=(self.img_size, self.img_size)))
 
-			categories.append(self.find_category(img_name))
+			category_id = img_struct.rel_path.split('/')[0]
+			categories.append(category_id)
+
+		unique_categories = sorted(list(set(categories)))
+		categories = list(map(lambda c: unique_categories.index(c), categories))
 
 		return {
 			'img': np.stack(imgs, axis=0),
