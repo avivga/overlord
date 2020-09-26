@@ -4,6 +4,7 @@ import os
 import json
 
 import numpy as np
+from scipy.spatial import distance
 from PIL import Image
 from tqdm import tqdm
 
@@ -121,6 +122,12 @@ def map_by_id(d):
 	}
 
 
+def angle_error(a, b):
+	d = a - b
+	d = (d + 180) % 360 - 180
+	return np.abs(d)
+
+
 @torch.no_grad()
 def eval_metrics(args):
 	translations_dir = os.path.join(args.eval_dir, 'translations')
@@ -161,23 +168,23 @@ def eval_metrics(args):
 			continue
 
 		losses['landmarks'].append(
-			np.mean(np.abs(content_landmarks[content_id][0] - translation_landmarks[translation_id][0]))
+			np.mean(np.square(content_landmarks[content_id][0] - translation_landmarks[translation_id][0]))
 		)
 
 		losses['embeddings'].append(
-			np.mean(np.abs(style_embeddings[style_id] - translation_embeddings[translation_id]))
+			distance.cosine(style_embeddings[style_id], translation_embeddings[translation_id])
 		)
 
 		losses['head_pose']['yaw'].append(
-			np.mean(np.abs(head_poses_content[content_id]['yaw'] - head_poses_translation[translation_id]['yaw']))
+			angle_error(head_poses_content[content_id]['yaw'], head_poses_translation[translation_id]['yaw'])
 		)
 
 		losses['head_pose']['pitch'].append(
-			np.mean(np.abs(head_poses_content[content_id]['pitch'] - head_poses_translation[translation_id]['pitch']))
+			angle_error(head_poses_content[content_id]['pitch'], head_poses_translation[translation_id]['pitch'])
 		)
 
 		losses['head_pose']['roll'].append(
-			np.mean(np.abs(head_poses_content[content_id]['roll'] - head_poses_translation[translation_id]['roll']))
+			angle_error(head_poses_content[content_id]['roll'], head_poses_translation[translation_id]['roll'])
 		)
 
 	summary = {
