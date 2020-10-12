@@ -291,7 +291,7 @@ class Model:
 				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
 				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
 
-			self.save(os.path.join(model_dir, '{:03d}'.format(epoch)))
+			self.save(model_dir)
 
 		summary.close()
 
@@ -321,6 +321,12 @@ class Model:
 			betas=(0.5, 0.999)
 		)
 
+		scheduler = CosineAnnealingLR(
+			optimizer,
+			T_max=self.config['warmup']['n_epochs'] * len(data_loader),
+			eta_min=self.config['warmup']['learning_rate']['min']
+		)
+
 		self.amortized_model.to(self.device)
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
@@ -341,6 +347,7 @@ class Model:
 				optimizer.zero_grad()
 				loss_encoders.backward()
 				optimizer.step()
+				scheduler.step()
 
 				pbar.set_description_str('epoch #{}'.format(epoch))
 				pbar.set_postfix(gen_loss=loss_encoders.item())

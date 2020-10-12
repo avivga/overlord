@@ -1,7 +1,7 @@
 base_config = dict(
 	content_dim=64,
-	class_dim=64,
-	style_dim=256,
+	class_dim=512,
+	style_dim=64,
 
 	content_std=0,
 
@@ -22,16 +22,17 @@ base_config = dict(
 
 		loss_weights=dict(
 			reconstruction=1,
-			content_decay=0.01
+			content_decay=0.001
 		)
 	),
 
 	warmup=dict(
 		batch_size=16,
-		n_epochs=20,
+		n_epochs=50,
 
 		learning_rate=dict(
-			encoder=1e-4
+			encoder=1e-4,
+			min=1e-5
 		),
 
 		loss_weights=dict(
