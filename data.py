@@ -8,6 +8,7 @@ import imageio
 import numpy as np
 import scipy.io
 import cv2
+import json
 
 from xml.etree import ElementTree
 from tqdm import tqdm
@@ -52,6 +53,41 @@ class AFHQ(DataSet):
 		return {
 			'img': np.concatenate(imgs, axis=0),
 			'class': np.concatenate(classes, axis=0)
+		}
+
+
+class FFHQ(DataSet):
+
+	def __init__(self, base_dir, extras):
+		super().__init__(base_dir)
+
+		parser = argparse.ArgumentParser()
+		parser.add_argument('-is', '--img-size', type=int, default=128)
+
+		args = parser.parse_args(extras)
+		self.__dict__.update(vars(args))
+
+	def read(self):
+		imgs = np.empty(shape=(70000, self.img_size, self.img_size, 3), dtype=np.uint8)
+		age = np.full(shape=(70000,), fill_value=-1, dtype=np.float32)
+		gender = np.full(shape=(70000,), fill_value=-1, dtype=np.int16)
+
+		img_ids = np.arange(70000)
+		for i in tqdm(img_ids):
+			img_path = os.path.join(self._base_dir, 'imgs-x256', 'img{:08d}.png'.format(i))
+			imgs[i] = cv2.resize(imageio.imread(img_path), dsize=(self.img_size, self.img_size))
+
+			features_path = os.path.join(self._base_dir, 'features', '{:05d}.json'.format(i))
+			with open(features_path, 'r') as features_fp:
+				features = json.load(features_fp)
+				if len(features) != 0:
+					age[i] = features[0]['faceAttributes']['age']
+					gender[i] = (features[0]['faceAttributes']['gender'] == 'male')
+
+		return {
+			'img': imgs,
+			'age': age,
+			'gender': gender
 		}
 
 
@@ -446,6 +482,7 @@ class AB(DataSet):
 supported_datasets = {
 	'afhq': AFHQ,
 	'celebahq': AFHQ,  # same structure
+	'ffhq': FFHQ,
 	'animalfaces': AnimalFaces,
 	'carnivores': Carnivores,
 	'cub': Cub,
