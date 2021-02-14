@@ -199,9 +199,15 @@ class VGGFeatures(nn.Module):
 
 		self.vgg = models.vgg16(pretrained=True)
 
-	def forward(self, x, layer_ids):
-		output = []
+		mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+		std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+		self.register_buffer('mean', mean)
+		self.register_buffer('std', std)
 
+	def forward(self, x, layer_ids):
+		x = (x - self.mean) / self.std
+
+		output = []
 		for i in range(layer_ids[-1] + 1):
 			x = self.vgg.features[i](x)
 
