@@ -381,7 +381,7 @@ class Model:
 		img_reconstructed = self.latent_model.generator(content_code_regularized, batch['class_code'], style_code)
 		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
 
-		loss_content_decay = torch.sum(batch['content_code'] ** 2, dim=1).mean()
+		loss_content_decay = torch.mean(batch['content_code'] ** 2, dim=1).mean()
 
 		return {
 			'reconstruction': loss_reconstruction,
