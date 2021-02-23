@@ -164,31 +164,31 @@ class Model:
 				batch['class_code'] = self.latent_model.class_embedding(batch['class_id'])
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
-				losses_generator = self.train_latent_generator(batch)
-				loss_generator = 0
-				for term, loss in losses_generator.items():
-					loss_generator += self.config['train']['loss_weights'][term] * loss
+				losses = self.train_latent_generator(batch)
+				loss_total = 0
+				for term, loss in losses.items():
+					loss_total += self.config['train']['loss_weights'][term] * loss
 
 				optimizer.zero_grad()
-				loss_generator.backward()
+				loss_total.backward()
 				optimizer.step()
 				scheduler.step()
 
 				pbar.set_description_str('epoch #{}'.format(epoch))
-				pbar.set_postfix(gen_loss=loss_generator.item())
+				pbar.set_postfix(loss=loss_total.item())
 
 			pbar.close()
 
-			summary.add_scalar(tag='loss/generator', scalar_value=loss_generator.item(), global_step=epoch)
+			summary.add_scalar(tag='loss/generator', scalar_value=loss_total.item(), global_step=epoch)
 
-			for term, loss in losses_generator.items():
+			for term, loss in losses.items():
 				summary.add_scalar(tag='loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
 
-			samples_fixed = self.generate_samples(dataset, randomized=False)
-			samples_random = self.generate_samples(dataset, randomized=True)
+			fig_translation_fixed = self.visualize_translation(dataset, randomized=False)
+			fig_translation_random = self.visualize_translation(dataset, randomized=True)
 
-			summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=epoch)
-			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
+			summary.add_image(tag='translation-fixed', img_tensor=fig_translation_fixed, global_step=epoch)
+			summary.add_image(tag='translation-random', img_tensor=fig_translation_random, global_step=epoch)
 
 			if epoch % 10 == 0:
 				content_codes = self.encode_content(dataset)
@@ -279,11 +279,11 @@ class Model:
 			for term, loss in losses_generator.items():
 				summary.add_scalar(tag='loss/generator/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
 
-			samples_fixed = self.generate_samples(dataset, randomized=False, amortized=True)
-			samples_random = self.generate_samples(dataset, randomized=True, amortized=True)
+			fig_translation_fixed = self.visualize_translation(dataset, randomized=False, amortized=True)
+			fig_translation_random = self.visualize_translation(dataset, randomized=True, amortized=True)
 
-			summary.add_image(tag='samples-fixed', img_tensor=samples_fixed, global_step=epoch)
-			summary.add_image(tag='samples-random', img_tensor=samples_random, global_step=epoch)
+			summary.add_image(tag='translation-fixed', img_tensor=fig_translation_fixed, global_step=epoch)
+			summary.add_image(tag='translation-random', img_tensor=fig_translation_random, global_step=epoch)
 
 			if epoch % 10 == 0:
 				content_codes = self.encode_content(dataset, amortized=True)
@@ -357,11 +357,11 @@ class Model:
 			for term, loss in losses_encoders.items():
 				summary.add_scalar(tag='loss/warmup/{}'.format(term), scalar_value=loss.item(), global_step=epoch)
 
-			samples_fixed = self.generate_samples(dataset, randomized=False, amortized=True)
-			samples_random = self.generate_samples(dataset, randomized=True, amortized=True)
+			fig_translation_fixed = self.visualize_translation(dataset, randomized=False, amortized=True)
+			fig_translation_random = self.visualize_translation(dataset, randomized=True, amortized=True)
 
-			summary.add_image(tag='warmup-fixed', img_tensor=samples_fixed, global_step=epoch)
-			summary.add_image(tag='warmup-random', img_tensor=samples_random, global_step=epoch)
+			summary.add_image(tag='warmup-translation-fixed', img_tensor=fig_translation_fixed, global_step=epoch)
+			summary.add_image(tag='warmup-translation-random', img_tensor=fig_translation_random, global_step=epoch)
 
 			self.save(model_dir)
 
@@ -577,7 +577,7 @@ class Model:
 		self.amortized_model.to(self.device)
 
 		for i in range(n_summaries):
-			summary_img = self.generate_samples(dataset, summary_size, randomized=True, amortized=True)
+			summary_img = self.visualize_translation(dataset, summary_size, randomized=True, amortized=True)
 			torchvision.utils.save_image(summary_img, os.path.join(out_dir, '{}.png'.format(i)))
 
 	@torch.no_grad()
@@ -605,7 +605,7 @@ class Model:
 		)
 
 	@torch.no_grad()
-	def generate_samples(self, dataset, n_samples=10, randomized=False, amortized=False):
+	def visualize_translation(self, dataset, n_samples=10, randomized=False, amortized=False):
 		random = self.rs if randomized else np.random.RandomState(seed=0)
 		img_idx = torch.from_numpy(random.choice(len(dataset), size=n_samples, replace=False))
 		samples = dataset[img_idx]
