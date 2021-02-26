@@ -110,6 +110,9 @@ class Model:
 		if self.amortized_model:
 			torch.save(self.amortized_model.state_dict(), os.path.join(checkpoint_dir, 'amortized.pth'))
 
+		if self.amortized_model_ema:
+			torch.save(self.amortized_model_ema.state_dict(), os.path.join(checkpoint_dir, 'amortized_ema.pth'))
+
 	def train(self, imgs, classes, model_dir, tensorboard_dir):
 		self.latent_model = LatentModel(self.config)
 
@@ -204,6 +207,9 @@ class Model:
 		self.amortized_model = AmortizedModel(self.config)
 		self.warmup(imgs, classes, model_dir, tensorboard_dir)
 
+		self.amortized_model_ema = AmortizedModel(self.config)
+		self.amortized_model_ema.load_state_dict(self.amortized_model.state_dict())
+
 		data = dict(
 			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
 			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
@@ -234,6 +240,7 @@ class Model:
 		)
 
 		self.amortized_model.to(self.device)
+		self.amortized_model_ema.to(self.device)
 		self.vgg_features.to(self.device)
 
 		summary = SummaryWriter(log_dir=tensorboard_dir)
@@ -267,6 +274,9 @@ class Model:
 				discriminator_optimizer.zero_grad()
 				loss_generator.backward()
 				generator_optimizer.step()
+
+				for param, param_ema in zip(self.amortized_model.parameters(), self.amortized_model_ema.parameters()):
+					param_ema.data = torch.lerp(param.data, param_ema.data, weight=0.999)
 
 				pbar.set_description_str('epoch #{}'.format(epoch))
 				pbar.set_postfix(gen_loss=loss_generator.item(), disc_loss=loss_discriminator.item())
