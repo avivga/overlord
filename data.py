@@ -56,6 +56,70 @@ class AFHQ(DataSet):
 		}
 
 
+class CelebAHQ(DataSet):
+
+	def __init__(self, base_dir, extras):
+		super().__init__(base_dir)
+
+		parser = argparse.ArgumentParser()
+		parser.add_argument('-pr', '--part', type=str, required=True)
+		parser.add_argument('-is', '--img-size', type=int, default=128)
+
+		args = parser.parse_args(extras)
+		self.__dict__.update(vars(args))
+
+	def __read_attributes(self):
+		with open(os.path.join(self._base_dir, 'CelebAMask-HQ', 'CelebAMask-HQ-attribute-anno.txt'), 'r') as fp:
+			lines = fp.read().splitlines()
+
+		attribute_names = lines[1].split()
+		attributes = dict()
+		for line in lines[2:]:
+			tokens = line.split()
+			img_name = os.path.splitext(tokens[0])[0]
+			img_attributes = np.array(list(map(int, tokens[1:])))
+			img_attributes[img_attributes == -1] = 0
+			attributes[img_name] = img_attributes
+
+		return attributes, attribute_names
+
+	def read(self):
+		img_names = sorted(os.listdir(os.path.join(self._base_dir, 'x1024')))
+		attributes_map, attribute_names = self.__read_attributes()
+
+		mask_paths = glob.glob(os.path.join(self._base_dir, 'CelebAMask-HQ', 'CelebAMask-HQ-mask-anno', '*', '*_{}.png'.format(self.part)))
+		mask_paths = {os.path.basename(p).split('_')[0]: p for p in mask_paths}
+
+		imgs = np.empty(shape=(len(img_names), self.img_size, self.img_size, 3), dtype=np.uint8)
+		masks = np.empty(shape=(len(img_names), self.img_size, self.img_size), dtype=np.uint8)
+		attributes = np.full(shape=(len(img_names), 40), fill_value=-1, dtype=np.int16)
+
+		for i, img_name in enumerate(tqdm(img_names)):
+			img_path = os.path.join(self._base_dir, 'x1024', img_name)
+			img = imageio.imread(img_path)
+			imgs[i] = cv2.resize(img, dsize=(self.img_size, self.img_size))
+
+			img_id = os.path.splitext(img_name)[0]
+			mask_id = '{:05d}'.format(int(img_id))
+			if mask_id in mask_paths:
+				mask = imageio.imread(mask_paths[mask_id])[..., 0]
+				mask = mask // 255
+				masks[i] = cv2.resize(mask, dsize=(self.img_size, self.img_size))
+			else:
+				masks[i] = np.zeros(shape=(self.img_size, self.img_size), dtype=np.uint8)
+
+			attributes[i] = attributes_map[img_id]
+
+		gender = attributes[:, attribute_names.index('Male')]
+
+		return {
+			'img': imgs,
+			'mask': masks,
+			'attributes': attributes,
+			'class': gender
+		}
+
+
 class FFHQ(DataSet):
 
 	def __init__(self, base_dir, extras):
@@ -564,7 +628,7 @@ class AB(DataSet):
 
 supported_datasets = {
 	'afhq': AFHQ,
-	'celebahq': AFHQ,  # same structure
+	'celebahq': CelebAHQ,
 	'ffhq': FFHQ,
 	'animalfaces': AnimalFaces,
 	'carnivores': Carnivores,
