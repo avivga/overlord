@@ -74,6 +74,7 @@ class Model:
 
 		self.latent_model = None
 		self.amortized_model = None
+		self.amortized_model_ema = None
 
 		self.vgg_features = VGGFeatures()
 		self.perceptual_loss = VGGDistance(self.vgg_features, config['perceptual_loss']['layers'])
@@ -94,6 +95,10 @@ class Model:
 		if os.path.exists(os.path.join(checkpoint_dir, 'amortized.pth')):
 			model.amortized_model = AmortizedModel(config)
 			model.amortized_model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'amortized.pth')))
+
+		if os.path.exists(os.path.join(checkpoint_dir, 'amortized_ema.pth')):
+			model.amortized_model_ema = AmortizedModel(config)
+			model.amortized_model_ema.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'amortized_ema.pth')))
 
 		return model
 
