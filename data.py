@@ -148,10 +148,13 @@ class FFHQ(DataSet):
 					age[i] = features[0]['faceAttributes']['age']
 					gender[i] = (features[0]['faceAttributes']['gender'] == 'male')
 
+		valid_idx = (age != -1)
+
 		return {
-			'img': imgs,
-			'age': age,
-			'gender': gender
+			'img': imgs[valid_idx],
+			'age': age[valid_idx],
+			'gender': gender[valid_idx],
+			'class': age[valid_idx].astype(np.int16) // 10
 		}
 
 
