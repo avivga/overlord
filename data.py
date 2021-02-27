@@ -62,7 +62,7 @@ class CelebAHQ(DataSet):
 		super().__init__(base_dir)
 
 		parser = argparse.ArgumentParser()
-		parser.add_argument('-pr', '--part', type=str, required=True)
+		parser.add_argument('-pr', '--parts', type=str, nargs='+', required=True)
 		parser.add_argument('-is', '--img-size', type=int, default=128)
 
 		args = parser.parse_args(extras)
@@ -87,8 +87,14 @@ class CelebAHQ(DataSet):
 		img_names = sorted(os.listdir(os.path.join(self._base_dir, 'x1024')))
 		attributes_map, attribute_names = self.__read_attributes()
 
-		mask_paths = glob.glob(os.path.join(self._base_dir, 'CelebAMask-HQ', 'CelebAMask-HQ-mask-anno', '*', '*_{}.png'.format(self.part)))
-		mask_paths = {os.path.basename(p).split('_')[0]: p for p in mask_paths}
+		mask_paths = glob.glob(os.path.join(self._base_dir, 'CelebAMask-HQ', 'CelebAMask-HQ-mask-anno', '*', '*.png'))
+		masks_index = dict()
+		for mask_path in mask_paths:
+			mask_id = os.path.splitext(os.path.basename(mask_path))[0].split('_')[0]
+			if mask_id not in masks_index:
+				masks_index[mask_id] = list()
+
+			masks_index[mask_id].append(mask_path)
 
 		imgs = np.empty(shape=(len(img_names), self.img_size, self.img_size, 3), dtype=np.uint8)
 		masks = np.empty(shape=(len(img_names), self.img_size, self.img_size), dtype=np.uint8)
@@ -101,12 +107,14 @@ class CelebAHQ(DataSet):
 
 			img_id = os.path.splitext(img_name)[0]
 			mask_id = '{:05d}'.format(int(img_id))
-			if mask_id in mask_paths:
-				mask = imageio.imread(mask_paths[mask_id])[..., 0]
-				mask = mask // 255
-				masks[i] = cv2.resize(mask, dsize=(self.img_size, self.img_size))
-			else:
-				masks[i] = np.zeros(shape=(self.img_size, self.img_size), dtype=np.uint8)
+
+			masks[i] = np.zeros(shape=(self.img_size, self.img_size), dtype=np.uint8)
+			for mask_path in masks_index[mask_id]:
+				part = '_'.join(os.path.splitext(os.path.basename(mask_path))[0].split('_')[1:])
+				if part in self.parts:
+					mask = imageio.imread(mask_path)[..., 0]
+					mask = mask // 255
+					masks[i] = np.clip(masks[i] + cv2.resize(mask, dsize=(self.img_size, self.img_size)), a_min=0, a_max=1)
 
 			attributes[i] = attributes_map[img_id]
 
