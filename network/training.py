@@ -29,19 +29,19 @@ class LatentModel(nn.Module):
 	def __init__(self, config):
 		super().__init__()
 
-		self.content_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['content_dim'])
+		self.uncorrelated_embedding = nn.Embedding(num_embeddings=config['n_imgs'], embedding_dim=config['uncorrelated_dim'])
 		self.class_embedding = nn.Embedding(num_embeddings=config['n_classes'], embedding_dim=config['class_dim'])
 
-		nn.init.uniform_(self.content_embedding.weight, a=-0.05, b=0.05)
+		nn.init.uniform_(self.uncorrelated_embedding.weight, a=-0.05, b=0.05)
 		nn.init.uniform_(self.class_embedding.weight, a=-0.05, b=0.05)
 
-		self.style_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['style_dim'])
+		self.correlated_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['correlated_dim'])
 
 		self.generator = Generator(
 			img_size=config['img_shape'][0],
-			content_dim=config['content_dim'],
+			uncorrelated_dim=config['uncorrelated_dim'],
 			class_dim=config['class_dim'],
-			style_dim=config['style_dim']
+			correlated_dim=config['correlated_dim']
 		)
 
 
@@ -50,15 +50,15 @@ class AmortizedModel(nn.Module):
 	def __init__(self, config):
 		super().__init__()
 
-		self.content_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['content_dim'])
+		self.uncorrelated_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['uncorrelated_dim'])
 		self.class_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['class_dim'])
-		self.style_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['style_dim'])
+		self.correlated_encoder = Encoder(img_size=config['img_shape'][0], code_dim=config['correlated_dim'])
 
 		self.generator = Generator(
 			img_size=config['img_shape'][0],
-			content_dim=config['content_dim'],
+			uncorrelated_dim=config['uncorrelated_dim'],
 			class_dim=config['class_dim'],
-			style_dim=config['style_dim']
+			correlated_dim=config['correlated_dim']
 		)
 
 		self.discriminator = Discriminator(size=config['img_shape'][0])
@@ -136,14 +136,14 @@ class Model:
 		optimizer = Adam([
 			{
 				'params': itertools.chain(
-					self.latent_model.content_embedding.parameters(),
+					self.latent_model.uncorrelated_embedding.parameters(),
 					self.latent_model.class_embedding.parameters()
 				),
 
 				'lr': self.config['train']['learning_rate']['latent']
 			},
 			{
-				'params': self.latent_model.style_encoder.parameters(),
+				'params': self.latent_model.correlated_encoder.parameters(),
 				'lr': self.config['train']['learning_rate']['encoder']
 			},
 			{
@@ -158,7 +158,7 @@ class Model:
 			eta_min=self.config['train']['learning_rate']['min']
 		)
 
-		self.latent_model.style_encoder.to(self.device)
+		self.latent_model.correlated_encoder.to(self.device)
 		self.latent_model.generator.to(self.device)
 		self.vgg_features.to(self.device)
 
@@ -168,7 +168,7 @@ class Model:
 
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
-				batch['content_code'] = self.latent_model.content_embedding(batch['img_id'])
+				batch['uncorrelated_code'] = self.latent_model.uncorrelated_embedding(batch['img_id'])
 				batch['class_code'] = self.latent_model.class_embedding(batch['class_id'])
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
@@ -199,10 +199,10 @@ class Model:
 			summary.add_image(tag='translation-random', img_tensor=fig_translation_random, global_step=epoch)
 
 			if epoch % 10 == 0:
-				content_codes = self.encode_content(dataset)
-				score_train, score_test = self.classification_score(X=content_codes, y=classes)
-				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
-				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
+				uncorrelated_codes = self.encode_uncorrelated(dataset)
+				score_train, score_test = self.classification_score(X=uncorrelated_codes, y=classes)
+				summary.add_scalar(tag='class_from_uncorrelated/train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='class_from_uncorrelated/test', scalar_value=score_test, global_step=epoch)
 
 			self.save(model_dir)
 
@@ -229,7 +229,7 @@ class Model:
 
 		generator_optimizer = Adam(
 			params=itertools.chain(
-				self.amortized_model.content_encoder.parameters(),
+				self.amortized_model.uncorrelated_encoder.parameters(),
 				self.amortized_model.class_encoder.parameters(),
 				self.amortized_model.generator.parameters()
 			),
@@ -254,7 +254,7 @@ class Model:
 
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
-				batch['content_code'] = self.latent_model.content_embedding(batch['img_id'])
+				batch['uncorrelated_code'] = self.latent_model.uncorrelated_embedding(batch['img_id'])
 				batch['class_code'] = self.latent_model.class_embedding(batch['class_id'])
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
@@ -301,17 +301,17 @@ class Model:
 			summary.add_image(tag='translation-random', img_tensor=fig_translation_random, global_step=epoch)
 
 			if epoch % 10 == 0:
-				content_codes = self.encode_content(dataset, amortized=True)
-				score_train, score_test = self.classification_score(X=content_codes, y=classes)
-				summary.add_scalar(tag='class_from_content/train', scalar_value=score_train, global_step=epoch)
-				summary.add_scalar(tag='class_from_content/test', scalar_value=score_test, global_step=epoch)
+				uncorrelated_codes = self.encode_uncorrelated(dataset, amortized=True)
+				score_train, score_test = self.classification_score(X=uncorrelated_codes, y=classes)
+				summary.add_scalar(tag='class_from_uncorrelated/train', scalar_value=score_train, global_step=epoch)
+				summary.add_scalar(tag='class_from_uncorrelated/test', scalar_value=score_test, global_step=epoch)
 
 			self.save(model_dir)
 
 		summary.close()
 
 	def warmup(self, imgs, classes, model_dir, tensorboard_dir):
-		self.amortized_model.style_encoder.load_state_dict(self.latent_model.style_encoder.state_dict())
+		self.amortized_model.correlated_encoder.load_state_dict(self.latent_model.correlated_encoder.state_dict())
 		self.amortized_model.generator.load_state_dict(self.latent_model.generator.state_dict())
 
 		data = dict(
@@ -328,7 +328,7 @@ class Model:
 
 		optimizer = Adam(
 			params=itertools.chain(
-				self.amortized_model.content_encoder.parameters(),
+				self.amortized_model.uncorrelated_encoder.parameters(),
 				self.amortized_model.class_encoder.parameters(),
 			),
 
@@ -350,7 +350,7 @@ class Model:
 
 			pbar = tqdm(iterable=data_loader)
 			for batch in pbar:
-				batch['content_code'] = self.latent_model.content_embedding(batch['img_id'])
+				batch['uncorrelated_code'] = self.latent_model.uncorrelated_embedding(batch['img_id'])
 				batch['class_code'] = self.latent_model.class_embedding(batch['class_id'])
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
@@ -383,48 +383,48 @@ class Model:
 		summary.close()
 
 	def train_latent_generator(self, batch):
-		if self.config['content_std'] != 0:
-			noise = torch.zeros_like(batch['content_code'])
-			noise.normal_(mean=0, std=self.config['content_std'])
+		if self.config['uncorrelated_std'] != 0:
+			noise = torch.zeros_like(batch['uncorrelated_code'])
+			noise.normal_(mean=0, std=self.config['uncorrelated_std'])
 
-			content_code_regularized = batch['content_code'] + noise
+			uncorrelated_code_regularized = batch['uncorrelated_code'] + noise
 		else:
-			content_code_regularized = batch['content_code']
+			uncorrelated_code_regularized = batch['uncorrelated_code']
 
-		style_code = self.latent_model.style_encoder(batch['img_augmented'])
+		correlated_code = self.latent_model.correlated_encoder(batch['img_augmented'])
 
-		img_reconstructed = self.latent_model.generator(content_code_regularized, batch['class_code'], style_code)
+		img_reconstructed = self.latent_model.generator(uncorrelated_code_regularized, batch['class_code'], correlated_code)
 		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
 
-		loss_content_decay = torch.mean(batch['content_code'] ** 2, dim=1).mean()
+		loss_uncorrelated_decay = torch.mean(batch['uncorrelated_code'] ** 2, dim=1).mean()
 
 		return {
 			'reconstruction': loss_reconstruction,
-			'content_decay': loss_content_decay
+			'uncorrelated_decay': loss_uncorrelated_decay
 		}
 
 	def train_encoders(self, batch):
-		content_code = self.amortized_model.content_encoder(batch['img'])
+		uncorrelated_code = self.amortized_model.uncorrelated_encoder(batch['img'])
 		class_code = self.amortized_model.class_encoder(batch['img'])
 
-		loss_content = torch.mean((content_code - batch['content_code']) ** 2, dim=1).mean()
+		loss_uncorrelated = torch.mean((uncorrelated_code - batch['uncorrelated_code']) ** 2, dim=1).mean()
 		loss_class = torch.mean((class_code - batch['class_code']) ** 2, dim=1).mean()
 
 		return {
-			'latent': loss_content + loss_class
+			'latent': loss_uncorrelated + loss_class
 		}
 
 	def train_amortized_generator(self, batch):
-		content_code = self.amortized_model.content_encoder(batch['img'])
+		uncorrelated_code = self.amortized_model.uncorrelated_encoder(batch['img'])
 		class_code = self.amortized_model.class_encoder(batch['img'])
 
 		with torch.no_grad():
-			style_code = self.amortized_model.style_encoder(batch['img'])
+			correlated_code = self.amortized_model.correlated_encoder(batch['img'])
 
-		img_reconstructed = self.amortized_model.generator(content_code, class_code, style_code)
+		img_reconstructed = self.amortized_model.generator(uncorrelated_code, class_code, correlated_code)
 		loss_reconstruction = self.perceptual_loss(img_reconstructed, batch['img'])
 
-		loss_content = torch.mean((content_code - batch['content_code']) ** 2, dim=1).mean()
+		loss_uncorrelated = torch.mean((uncorrelated_code - batch['uncorrelated_code']) ** 2, dim=1).mean()
 		loss_class = torch.mean((class_code - batch['class_code']) ** 2, dim=1).mean()
 
 		discriminator_fake = self.amortized_model.discriminator(img_reconstructed)
@@ -432,16 +432,16 @@ class Model:
 
 		return {
 			'reconstruction': loss_reconstruction,
-			'latent': loss_content + loss_class,
+			'latent': loss_uncorrelated + loss_class,
 			'adversarial': loss_adversarial
 		}
 
 	def train_discriminator(self, batch):
 		with torch.no_grad():
-			content_code = self.amortized_model.content_encoder(batch['img'])
+			uncorrelated_code = self.amortized_model.uncorrelated_encoder(batch['img'])
 			class_code = self.amortized_model.class_encoder(batch['img'])
-			style_code = self.amortized_model.style_encoder(batch['img'])
-			img_reconstructed = self.amortized_model.generator(content_code, class_code, style_code)
+			correlated_code = self.amortized_model.correlated_encoder(batch['img'])
+			img_reconstructed = self.amortized_model.generator(uncorrelated_code, class_code, correlated_code)
 
 		batch['img'].requires_grad_()  # for gradient penalty
 		discriminator_fake = self.amortized_model.discriminator(img_reconstructed)
@@ -501,38 +501,38 @@ class Model:
 			translation_dir = os.path.join(out_dir, '{}-to-{}'.format(source_class, target_class))
 			os.mkdir(translation_dir)
 
-			os.mkdir(os.path.join(translation_dir, 'content'))
-			os.mkdir(os.path.join(translation_dir, 'style'))
+			os.mkdir(os.path.join(translation_dir, 'uncorrelated'))
+			os.mkdir(os.path.join(translation_dir, 'correlated'))
 			os.mkdir(os.path.join(translation_dir, 'translation'))
 
 			pbar = tqdm(class_img_ids[source_class])
 			pbar.set_description_str('translating {} to {}'.format(source_class, target_class))
 
-			for content_idx in pbar:
-				style_idxs = rs.choice(class_img_ids[target_class], size=n_translations_per_image, replace=False)
+			for uncorrelated_idx in pbar:
+				correlated_idxs = rs.choice(class_img_ids[target_class], size=n_translations_per_image, replace=False)
 
-				content_imgs = torch.stack([dataset[content_idx]['img']] * n_translations_per_image, dim=0)
-				style_imgs = dataset[style_idxs]['img']
+				uncorrelated_imgs = torch.stack([dataset[uncorrelated_idx]['img']] * n_translations_per_image, dim=0)
+				correlated_imgs = dataset[correlated_idxs]['img']
 
-				content_codes = self.amortized_model.content_encoder(content_imgs.to(self.device))
-				class_codes = self.amortized_model.class_encoder(style_imgs.to(self.device))
-				style_codes = self.amortized_model.style_encoder(style_imgs.to(self.device))
+				uncorrelated_codes = self.amortized_model.uncorrelated_encoder(uncorrelated_imgs.to(self.device))
+				class_codes = self.amortized_model.class_encoder(correlated_imgs.to(self.device))
+				correlated_codes = self.amortized_model.correlated_encoder(correlated_imgs.to(self.device))
 
-				translated_imgs = self.amortized_model.generator(content_codes, class_codes, style_codes).cpu()
+				translated_imgs = self.amortized_model.generator(uncorrelated_codes, class_codes, correlated_codes).cpu()
 				for i in range(n_translations_per_image):
 					torchvision.utils.save_image(
-						content_imgs[i],
-						os.path.join(translation_dir, 'content', '{}.png'.format(content_idx))
+						uncorrelated_imgs[i],
+						os.path.join(translation_dir, 'uncorrelated', '{}.png'.format(uncorrelated_idx))
 					)
 
 					torchvision.utils.save_image(
-						style_imgs[i],
-						os.path.join(translation_dir, 'style', '{}.png'.format(style_idxs[i]))
+						correlated_imgs[i],
+						os.path.join(translation_dir, 'correlated', '{}.png'.format(correlated_idxs[i]))
 					)
 
 					torchvision.utils.save_image(
 						translated_imgs[i],
-						os.path.join(translation_dir, 'translation', '{}-{}.png'.format(content_idx, style_idxs[i]))
+						os.path.join(translation_dir, 'translation', '{}-{}.png'.format(uncorrelated_idx, correlated_idxs[i]))
 					)
 
 	@torch.no_grad()
@@ -549,35 +549,35 @@ class Model:
 		rs = np.random.RandomState(seed=1337)
 		dataset = NamedTensorDataset(data)
 
-		os.mkdir(os.path.join(out_dir, 'content'))
-		os.mkdir(os.path.join(out_dir, 'style'))
+		os.mkdir(os.path.join(out_dir, 'uncorrelated'))
+		os.mkdir(os.path.join(out_dir, 'correlated'))
 		os.mkdir(os.path.join(out_dir, 'translation'))
 
 		all_idx = np.arange(data['img'].shape[0])
-		for content_idx in tqdm(all_idx):
-			style_idxs = rs.choice(np.delete(all_idx, content_idx), size=n_translations_per_image, replace=False)
+		for uncorrelated_idx in tqdm(all_idx):
+			correlated_idxs = rs.choice(np.delete(all_idx, uncorrelated_idx), size=n_translations_per_image, replace=False)
 
-			content_imgs = torch.stack([dataset[content_idx]['img']] * n_translations_per_image, dim=0)
-			style_imgs = dataset[style_idxs]['img']
+			uncorrelated_imgs = torch.stack([dataset[uncorrelated_idx]['img']] * n_translations_per_image, dim=0)
+			correlated_imgs = dataset[correlated_idxs]['img']
 
-			content_codes = self.amortized_model.content_encoder(content_imgs.to(self.device))
-			class_codes = self.amortized_model.class_encoder(style_imgs.to(self.device))
-			style_codes = self.amortized_model.style_encoder(style_imgs.to(self.device))
+			uncorrelated_codes = self.amortized_model.uncorrelated_encoder(uncorrelated_imgs.to(self.device))
+			class_codes = self.amortized_model.class_encoder(correlated_imgs.to(self.device))
+			correlated_codes = self.amortized_model.correlated_encoder(correlated_imgs.to(self.device))
 
-			translated_imgs = self.amortized_model.generator(content_codes, class_codes, style_codes).cpu()
+			translated_imgs = self.amortized_model.generator(uncorrelated_codes, class_codes, correlated_codes).cpu()
 			for i in range(n_translations_per_image):
 				torchvision.utils.save_image(
-					content_imgs[i],
-					os.path.join(out_dir, 'content', '{}.png'.format(content_idx)))
+					uncorrelated_imgs[i],
+					os.path.join(out_dir, 'uncorrelated', '{}.png'.format(uncorrelated_idx)))
 
 				torchvision.utils.save_image(
-					style_imgs[i],
-					os.path.join(out_dir, 'style', '{}.png'.format(style_idxs[i]))
+					correlated_imgs[i],
+					os.path.join(out_dir, 'correlated', '{}.png'.format(correlated_idxs[i]))
 				)
 
 				torchvision.utils.save_image(
 					translated_imgs[i],
-					os.path.join(out_dir, 'translation', '{}-{}.png'.format(content_idx, style_idxs[i]))
+					os.path.join(out_dir, 'translation', '{}-{}.png'.format(uncorrelated_idx, correlated_idxs[i]))
 				)
 
 	@torch.no_grad()
@@ -608,14 +608,14 @@ class Model:
 		if amortized:
 			self.amortized_model.to(self.device)
 		else:
-			self.latent_model.style_encoder.to(self.device)
+			self.latent_model.correlated_encoder.to(self.device)
 			self.latent_model.generator.to(self.device)
 
 		np.savez(
 			file=out_path,
-			content_codes=self.encode_content(dataset, amortized),
+			uncorrelated_codes=self.encode_uncorrelated(dataset, amortized),
 			class_codes=self.encode_class(dataset, amortized),
-			style_codes=self.encode_style(dataset, amortized),
+			correlated_codes=self.encode_correlated(dataset, amortized),
 			class_ids=classes
 		)
 
@@ -628,16 +628,16 @@ class Model:
 		if amortized:
 			self.amortized_model.eval()
 
-			samples['content_code'] = self.amortized_model.content_encoder(samples['img'].to(self.device))
+			samples['uncorrelated_code'] = self.amortized_model.uncorrelated_encoder(samples['img'].to(self.device))
 			samples['class_code'] = self.amortized_model.class_encoder(samples['img'].to(self.device))
-			samples['style_code'] = self.amortized_model.style_encoder(samples['img'].to(self.device))
+			samples['correlated_code'] = self.amortized_model.correlated_encoder(samples['img'].to(self.device))
 
 		else:
 			self.latent_model.eval()
 
-			samples['content_code'] = self.latent_model.content_embedding(samples['img_id'])
+			samples['uncorrelated_code'] = self.latent_model.uncorrelated_embedding(samples['img_id'])
 			samples['class_code'] = self.latent_model.class_embedding(samples['class_id'])
-			samples['style_code'] = self.latent_model.style_encoder(samples['img'].to(self.device))
+			samples['correlated_code'] = self.latent_model.correlated_encoder(samples['img'].to(self.device))
 
 		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
 
@@ -648,7 +648,7 @@ class Model:
 
 			for j in range(n_samples):
 				generator = self.amortized_model.generator if amortized else self.latent_model.generator
-				converted_img = generator(samples['content_code'][[j]], samples['class_code'][[i]], samples['style_code'][[i]])
+				converted_img = generator(samples['uncorrelated_code'][[j]], samples['class_code'][[i]], samples['correlated_code'][[i]])
 				converted_imgs.append(converted_img[0])
 
 			summary.append(torch.cat(converted_imgs, dim=2))
@@ -657,24 +657,24 @@ class Model:
 		return summary.clamp(min=0, max=1)
 
 	@torch.no_grad()
-	def encode_content(self, dataset, amortized=False):
+	def encode_uncorrelated(self, dataset, amortized=False):
 		if amortized:
 			self.amortized_model.eval()
 		else:
 			self.latent_model.eval()
 
-		content_codes = []
+		uncorrelated_codes = []
 		data_loader = DataLoader(dataset, batch_size=64, shuffle=False, pin_memory=True, drop_last=False)
 		for batch in data_loader:
 			if amortized:
-				batch_content_codes = self.amortized_model.content_encoder(batch['img'].to(self.device))
+				batch_uncorrelated_codes = self.amortized_model.uncorrelated_encoder(batch['img'].to(self.device))
 			else:
-				batch_content_codes = self.latent_model.content_embedding(batch['img_id'])
+				batch_uncorrelated_codes = self.latent_model.uncorrelated_embedding(batch['img_id'])
 
-			content_codes.append(batch_content_codes.cpu().numpy())
+			uncorrelated_codes.append(batch_uncorrelated_codes.cpu().numpy())
 
-		content_codes = np.concatenate(content_codes, axis=0)
-		return content_codes
+		uncorrelated_codes = np.concatenate(uncorrelated_codes, axis=0)
+		return uncorrelated_codes
 
 	@torch.no_grad()
 	def encode_class(self, dataset, amortized=False):
@@ -697,18 +697,18 @@ class Model:
 		return class_codes
 
 	@torch.no_grad()
-	def encode_style(self, dataset, amortized=False):
-		style_encoder = self.amortized_model.style_encoder if amortized else self.latent_model.style_encoder
-		style_encoder.eval()
+	def encode_correlated(self, dataset, amortized=False):
+		correlated_encoder = self.amortized_model.correlated_encoder if amortized else self.latent_model.correlated_encoder
+		correlated_encoder.eval()
 
-		style_codes = []
+		correlated_codes = []
 		data_loader = DataLoader(dataset, batch_size=64, shuffle=False, pin_memory=True, drop_last=False)
 		for batch in data_loader:
-			batch_style_codes = style_encoder(batch['img'].to(self.device))
-			style_codes.append(batch_style_codes.cpu().numpy())
+			batch_correlated_codes = correlated_encoder(batch['img'].to(self.device))
+			correlated_codes.append(batch_correlated_codes.cpu().numpy())
 
-		style_codes = np.concatenate(style_codes, axis=0)
-		return style_codes
+		correlated_codes = np.concatenate(correlated_codes, axis=0)
+		return correlated_codes
 
 	@staticmethod
 	def classification_score(X, y):

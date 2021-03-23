@@ -12,10 +12,10 @@ from model import ConstantInput, ToRGB, ModulatedConv2d, FusedLeakyReLU
 
 class Generator(nn.Module):
 
-	def __init__(self, img_size, content_dim, class_dim, style_dim):
+	def __init__(self, img_size, uncorrelated_dim, class_dim, correlated_dim):
 		super().__init__()
 
-		latent_dim = content_dim + class_dim + style_dim
+		latent_dim = uncorrelated_dim + class_dim + correlated_dim
 
 		channel_multiplier = 2
 		blur_kernel = [1, 3, 3, 1]
@@ -71,8 +71,8 @@ class Generator(nn.Module):
 
 		self.n_latent = self.log_size * 2 - 2
 
-	def forward(self, content_code, class_code, style_code):
-		latent_code = torch.cat((content_code, class_code, style_code), dim=1)
+	def forward(self, uncorrelated_code, class_code, correlated_code):
+		latent_code = torch.cat((uncorrelated_code, class_code, correlated_code), dim=1)
 		latent_code = latent_code.unsqueeze(dim=1).repeat(1, self.n_latent, 1)
 
 		out = self.input(latent_code)

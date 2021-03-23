@@ -1,16 +1,16 @@
 base_config = dict(
-	content_dim=64,
+	uncorrelated_dim=64,
 	class_dim=512,
-	style_dim=64,
+	correlated_dim=64,
 
-	content_std=0,
+	uncorrelated_std=1,
 
 	perceptual_loss=dict(
 		layers=[2, 7, 12, 21, 30]
 	),
 
 	train=dict(
-		batch_size=16,
+		batch_size=8,
 		n_epochs=200,
 
 		learning_rate=dict(
@@ -22,12 +22,12 @@ base_config = dict(
 
 		loss_weights=dict(
 			reconstruction=1,
-			content_decay=0.001
+			uncorrelated_decay=0.001
 		)
 	),
 
 	warmup=dict(
-		batch_size=16,
+		batch_size=8,
 		n_epochs=50,
 
 		learning_rate=dict(
@@ -41,7 +41,7 @@ base_config = dict(
 	),
 
 	amortize=dict(
-		batch_size=8,
+		batch_size=4,
 		n_epochs=100,
 
 		learning_rate=dict(
