@@ -12,10 +12,8 @@ from model import ConstantInput, ToRGB, ModulatedConv2d, FusedLeakyReLU
 
 class Generator(nn.Module):
 
-	def __init__(self, img_size, uncorrelated_dim, class_dim, correlated_dim):
+	def __init__(self, latent_dim, img_size):
 		super().__init__()
-
-		latent_dim = uncorrelated_dim + class_dim + correlated_dim
 
 		channel_multiplier = 2
 		blur_kernel = [1, 3, 3, 1]
@@ -71,8 +69,7 @@ class Generator(nn.Module):
 
 		self.n_latent = self.log_size * 2 - 2
 
-	def forward(self, uncorrelated_code, class_code, correlated_code):
-		latent_code = torch.cat((uncorrelated_code, class_code, correlated_code), dim=1)
+	def forward(self, latent_code):
 		latent_code = latent_code.unsqueeze(dim=1).repeat(1, self.n_latent, 1)
 
 		out = self.input(latent_code)
@@ -194,24 +191,25 @@ class ResBlk(nn.Module):
 
 class VGGFeatures(nn.Module):
 
-	def __init__(self):
+	def __init__(self, layer_ids):
 		super().__init__()
 
-		self.vgg = models.vgg16(pretrained=True)
+		self.features = models.vgg16(pretrained=True).features
+		self.layer_ids = layer_ids
 
 		mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 		std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 		self.register_buffer('mean', mean)
 		self.register_buffer('std', std)
 
-	def forward(self, x, layer_ids):
+	def forward(self, x):
 		x = (x - self.mean) / self.std
 
 		output = []
-		for i in range(layer_ids[-1] + 1):
-			x = self.vgg.features[i](x)
+		for i in range(self.layer_ids[-1] + 1):
+			x = self.features[i](x)
 
-			if i in layer_ids:
+			if i in self.layer_ids:
 				output.append(x)
 
 		return output
@@ -219,21 +217,20 @@ class VGGFeatures(nn.Module):
 
 class VGGDistance(nn.Module):
 
-	def __init__(self, vgg_features, layer_ids):
+	def __init__(self, layer_ids):
 		super().__init__()
 
-		self.vgg_features = vgg_features
-		self.layer_ids = layer_ids
+		self.vgg_features = torch.nn.DataParallel(VGGFeatures(layer_ids))
 
 	def forward(self, I1, I2):
 		batch_size = I1.size(0)
 
-		f1 = self.vgg_features(I1, self.layer_ids)
-		f2 = self.vgg_features(I2, self.layer_ids)
+		f1 = self.vgg_features(I1)
+		f2 = self.vgg_features(I2)
 
 		loss = torch.abs(I1 - I2).view(batch_size, -1).mean(dim=1)
 
-		for i in range(len(self.layer_ids)):
+		for i in range(len(f1)):
 			layer_loss = torch.abs(f1[i] - f2[i]).view(batch_size, -1).mean(dim=1)
 			loss = loss + layer_loss
 

@@ -1,0 +1,61 @@
+labeled_attribute: domain
+correlation: pose-invariant
+
+label_dim: 256
+correlated_dim: 64
+uncorrelated_dim: 64
+
+uncorrelated_std: 1
+
+correlation_augmentation:
+  scale:
+    - 0.6
+    - 1.0
+
+  rotation: 0
+  flip_horizontal: True
+
+disentanglement:
+  batch_size: 32
+  n_epochs: 100
+  n_epochs_between_visualizations: 1
+
+  learning_rate:
+    latent: 0.01
+    encoder: 0.0001
+    generator: 0.001
+    min: 0.00001
+
+  loss_weights:
+    reconstruction: 1
+    uncorrelated_decay: 0.00001
+
+amortization:
+  batch_size: 64
+  n_epochs: 50
+  n_epochs_between_visualizations: 5
+
+  learning_rate:
+    max: 0.0001
+    min: 0.00001
+
+synthesis:
+  batch_size: 16
+  n_epochs: 100
+  n_epochs_between_visualizations: 1
+
+  learning_rate:
+    generator: 0.0001
+    discriminator: 0.0001
+
+  loss_weights:
+    reconstruction: 1
+    latent: 10
+    adversarial: 1
+
+perceptual_loss_layers:
+  - 2
+  - 7
+  - 12
+  - 21
+  - 30
