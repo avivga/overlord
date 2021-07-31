@@ -191,19 +191,22 @@ class ResBlk(nn.Module):
 
 class VGGFeatures(nn.Module):
 
-	def __init__(self, layer_ids):
+	def __init__(self, layer_ids, normalize):
 		super().__init__()
 
 		self.features = models.vgg16(pretrained=True).features
 		self.layer_ids = layer_ids
+		self.normalize = normalize
 
-		mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-		std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-		self.register_buffer('mean', mean)
-		self.register_buffer('std', std)
+		if normalize:
+			mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+			std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+			self.register_buffer('mean', mean)
+			self.register_buffer('std', std)
 
 	def forward(self, x):
-		x = (x - self.mean) / self.std
+		if self.normalize:
+			x = (x - self.mean) / self.std
 
 		output = []
 		for i in range(self.layer_ids[-1] + 1):
@@ -217,10 +220,10 @@ class VGGFeatures(nn.Module):
 
 class VGGDistance(nn.Module):
 
-	def __init__(self, layer_ids):
+	def __init__(self, layer_ids, normalize):
 		super().__init__()
 
-		self.vgg_features = torch.nn.DataParallel(VGGFeatures(layer_ids))
+		self.vgg_features = torch.nn.DataParallel(VGGFeatures(layer_ids, normalize))
 
 	def forward(self, I1, I2):
 		batch_size = I1.size(0)

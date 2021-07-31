@@ -88,7 +88,11 @@ class Model:
 		self.latent_model = None
 		self.amortized_model = None
 
-		self.reconstruction_loss = VGGDistance(layer_ids=config['perceptual_loss_layers'])
+		self.reconstruction_loss = VGGDistance(
+			layer_ids=config['perceptual_loss']['layers'],
+			normalize=config['perceptual_loss']['normalize']
+		)
+
 		self.rs = np.random.RandomState(seed=1337)
 
 	@staticmethod

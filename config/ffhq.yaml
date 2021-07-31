@@ -7,8 +7,8 @@ uncorrelated_dim: 256
 uncorrelated_std: 1
 
 disentanglement:
-  batch_size: 8
-  n_epochs: 1
+  batch_size: 32
+  n_epochs: 200
   n_epochs_between_visualizations: 1
 
   learning_rate:
@@ -18,11 +18,11 @@ disentanglement:
 
   loss_weights:
     reconstruction: 1
-    uncorrelated_decay: 0.0001
+    uncorrelated_decay: 0.00001
 
 amortization:
   batch_size: 64
-  n_epochs: 1
+  n_epochs: 50
   n_epochs_between_visualizations: 5
 
   learning_rate:
@@ -43,9 +43,12 @@ synthesis:
     latent: 10
     adversarial: 1
 
-perceptual_loss_layers:
-  - 2
-  - 7
-  - 12
-  - 21
-  - 30
+perceptual_loss:
+  layers:
+    - 2
+    - 7
+    - 12
+    - 21
+    - 30
+
+  normalize: True

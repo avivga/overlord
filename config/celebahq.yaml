@@ -16,8 +16,8 @@ correlation_augmentation:
   flip_horizontal: True
 
 disentanglement:
-  batch_size: 8
-  n_epochs: 100
+  batch_size: 16
+  n_epochs: 200
   n_epochs_between_visualizations: 1
 
   learning_rate:
@@ -28,7 +28,7 @@ disentanglement:
 
   loss_weights:
     reconstruction: 1
-    uncorrelated_decay: 0.0001
+    uncorrelated_decay: 0.00001
 
 amortization:
   batch_size: 64
@@ -53,9 +53,12 @@ synthesis:
     latent: 10
     adversarial: 1
 
-perceptual_loss_layers:
-  - 2
-  - 7
-  - 12
-  - 21
-  - 30
+perceptual_loss:
+  layers:
+    - 2
+    - 7
+    - 12
+    - 21
+    - 30
+
+  normalize: True
