@@ -224,7 +224,8 @@ class CelebA(DataSet):
 
 		return {
 			'imgs': imgs,
-			'identity': identities
+			'identity': identities,
+			'identity-ids': unique_identities
 		}
 
 
