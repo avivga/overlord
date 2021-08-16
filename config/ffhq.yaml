@@ -22,11 +22,11 @@ disentanglement:
 
 amortization:
   batch_size: 64
-  n_epochs: 50
+  n_epochs: 100
   n_epochs_between_visualizations: 5
 
   learning_rate:
-    max: 0.0001
+    max: 0.0002
     min: 0.00001
 
 synthesis:
@@ -40,7 +40,7 @@ synthesis:
 
   loss_weights:
     reconstruction: 1
-    latent: 10
+    latent: 2
     adversarial: 1
 
 perceptual_loss:
