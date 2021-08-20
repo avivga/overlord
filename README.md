@@ -8,14 +8,15 @@
 <a href="https://arxiv.org/abs/2103.14017" target="_blank"><img src="https://img.shields.io/badge/arXiv-2103.14017-b31b1b.svg"></a>
 
 ## Description
+A blbla method for.
 
 ### Case 1: Uncorrelated Labeled and Unlabeled Attributes
 - Facial age editing (FFHQ)
 
-| Input | [0-9] | [10-19] | [20-29] | [30-39] | [40-49] | [50-59] | [60-69] | [70-79] |
-|:-----:|:-----:|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|
-|   ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-0.jpg)   |   ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-1.jpg)   |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-2.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-3.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-4.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-5.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-6.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-7.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-8.jpg)    |
-|   ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-0.jpg)   |   ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-1.jpg)   |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-2.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-3.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-4.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-5.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-6.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-7.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-8.jpg)    |
+| Input | [0-9] | [10-19] | [20-39] | [40-59] | [60-79] |
+|:-----:|:-----:|:-------:|:-------:|:-------:|:-------:|
+|   ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-0.jpg)   |   ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-1.jpg)   |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-2.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-4.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-6.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/a/0-8.jpg)    |
+|   ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-0.jpg)   |   ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-1.jpg)   |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-2.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-4.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-6.jpg)    |    ![](http://www.vision.huji.ac.il/overlord/img/aging/b/0-8.jpg)    |
 
 
 - Identity (CelebA)
