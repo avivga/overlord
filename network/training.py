@@ -187,7 +187,7 @@ class Model:
 			for batch in pbar:
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
-				losses = self.iterate_latent_model(batch)
+				losses = self.__iterate_latent_model(batch)
 				loss = 0
 				for term, val in losses.items():
 					loss += self.config['disentanglement']['loss_weights'][term] * val
@@ -208,8 +208,8 @@ class Model:
 				summary.add_scalar(tag='loss/{}'.format(term), scalar_value=val.item(), global_step=epoch)
 
 			if epoch % self.config['disentanglement']['n_epochs_between_visualizations'] == 0:
-				figure_fixed = self.visualize_translation(dataset, randomized=False)
-				figure_random = self.visualize_translation(dataset, randomized=True)
+				figure_fixed = self.__visualize_translation(dataset, randomized=False)
+				figure_random = self.__visualize_translation(dataset, randomized=True)
 
 				summary.add_image(tag='translation-fixed', img_tensor=figure_fixed, global_step=epoch)
 				summary.add_image(tag='translation-random', img_tensor=figure_random, global_step=epoch)
@@ -274,7 +274,7 @@ class Model:
 			for batch in pbar:
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
-				losses = self.iterate_encoders(batch)
+				losses = self.__iterate_encoders(batch)
 				loss = 0
 				for term, val in losses.items():
 					loss += val
@@ -293,8 +293,8 @@ class Model:
 				summary.add_scalar(tag='loss/{}'.format(term), scalar_value=val.item(), global_step=epoch)
 
 			if epoch % self.config['amortization']['n_epochs_between_visualizations'] == 0:
-				figure_fixed = self.visualize_translation(dataset, randomized=False, amortized=True)
-				figure_random = self.visualize_translation(dataset, randomized=True, amortized=True)
+				figure_fixed = self.__visualize_translation(dataset, randomized=False, amortized=True)
+				figure_random = self.__visualize_translation(dataset, randomized=True, amortized=True)
 
 				summary.add_image(tag='translation-fixed', img_tensor=figure_fixed, global_step=epoch)
 				summary.add_image(tag='translation-random', img_tensor=figure_random, global_step=epoch)
@@ -359,7 +359,7 @@ class Model:
 			for batch in pbar:
 				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
-				losses_discriminator = self.iterate_discriminator(batch)
+				losses_discriminator = self.__iterate_discriminator(batch)
 				loss_discriminator = (
 					losses_discriminator['fake']
 					+ losses_discriminator['real']
@@ -371,7 +371,7 @@ class Model:
 				loss_discriminator.backward()
 				discriminator_optimizer.step()
 
-				losses_generator = self.iterate_amortized_model(batch)
+				losses_generator = self.__iterate_amortized_model(batch)
 				loss_generator = 0
 				for term, val in losses_generator.items():
 					loss_generator += self.config['synthesis']['loss_weights'][term] * val
@@ -393,8 +393,8 @@ class Model:
 				summary.add_scalar(tag='loss/generator/{}'.format(term), scalar_value=val.item(), global_step=epoch)
 
 			if epoch % self.config['synthesis']['n_epochs_between_visualizations'] == 0:
-				figure_fixed = self.visualize_translation(dataset, randomized=False, amortized=True)
-				figure_random = self.visualize_translation(dataset, randomized=True, amortized=True)
+				figure_fixed = self.__visualize_translation(dataset, randomized=False, amortized=True)
+				figure_random = self.__visualize_translation(dataset, randomized=True, amortized=True)
 
 				summary.add_image(tag='translation-fixed', img_tensor=figure_fixed, global_step=epoch)
 				summary.add_image(tag='translation-random', img_tensor=figure_random, global_step=epoch)
@@ -403,7 +403,7 @@ class Model:
 
 		summary.close()
 
-	def iterate_latent_model(self, batch):
+	def __iterate_latent_model(self, batch):
 		label_code = self.latent_model.label_embedding(batch['label'])
 
 		uncorrelated_code = self.latent_model.uncorrelated_embedding(batch['img_id'])
@@ -431,7 +431,7 @@ class Model:
 			'uncorrelated_decay': loss_uncorrelated_decay
 		}
 
-	def iterate_encoders(self, batch):
+	def __iterate_encoders(self, batch):
 		with torch.no_grad():
 			label_code_target = self.latent_model.label_embedding(batch['label'])
 			uncorrelated_code_target = self.latent_model.uncorrelated_embedding(batch['img_id'])
@@ -458,7 +458,7 @@ class Model:
 
 		return losses
 
-	def iterate_amortized_model(self, batch):
+	def __iterate_amortized_model(self, batch):
 		with torch.no_grad():
 			label_code_target = self.latent_model.label_embedding(batch['label'])
 			uncorrelated_code_target = self.latent_model.uncorrelated_embedding(batch['img_id'])
@@ -484,7 +484,7 @@ class Model:
 		loss_reconstruction = self.reconstruction_loss(img_reconstructed, batch['img'])
 
 		discriminator_fake = self.amortized_model.discriminator(img_reconstructed)
-		loss_adversarial = self.adv_loss(discriminator_fake, 1)
+		loss_adversarial = self.__adv_loss(discriminator_fake, 1)
 
 		losses = {
 			'reconstruction': loss_reconstruction,
@@ -497,7 +497,7 @@ class Model:
 
 		return losses
 
-	def iterate_discriminator(self, batch):
+	def __iterate_discriminator(self, batch):
 		with torch.no_grad():
 			label_code = self.amortized_model.label_encoder(batch['img'])
 			uncorrelated_code = self.amortized_model.uncorrelated_encoder(batch['img'])
@@ -514,9 +514,9 @@ class Model:
 		discriminator_fake = self.amortized_model.discriminator(img_reconstructed)
 		discriminator_real = self.amortized_model.discriminator(batch['img'])
 
-		loss_fake = self.adv_loss(discriminator_fake, 0)
-		loss_real = self.adv_loss(discriminator_real, 1)
-		loss_gp = self.gradient_penalty(discriminator_real, batch['img'])
+		loss_fake = self.__adv_loss(discriminator_fake, 0)
+		loss_real = self.__adv_loss(discriminator_real, 1)
+		loss_gp = self.__gradient_penalty(discriminator_real, batch['img'])
 
 		return {
 			'fake': loss_fake,
@@ -524,25 +524,24 @@ class Model:
 			'gradient_penalty': loss_gp
 		}
 
-	def adv_loss(self, logits, target):
-		assert target in [1, 0]
+	@staticmethod
+	def __adv_loss(logits, target):
 		targets = torch.full_like(logits, fill_value=target)
 		loss = F.binary_cross_entropy_with_logits(logits, targets)
 		return loss
 
-	def gradient_penalty(self, d_out, x_in):
+	@staticmethod
+	def __gradient_penalty(d_out, x_in):
 		batch_size = x_in.size(0)
-		grad_dout = torch.autograd.grad(
-			outputs=d_out.sum(), inputs=x_in,
-			create_graph=True, retain_graph=True, only_inputs=True
-		)[0]
+
+		grad_dout = torch.autograd.grad(outputs=d_out.sum(), inputs=x_in, create_graph=True, retain_graph=True, only_inputs=True)[0]
 		grad_dout2 = grad_dout.pow(2)
-		assert(grad_dout2.size() == x_in.size())
+
 		reg = 0.5 * grad_dout2.view(batch_size, -1).sum(1).mean(0)
 		return reg
 
 	@torch.no_grad()
-	def visualize_translation(self, dataset, n_samples=10, randomized=False, amortized=False):
+	def __visualize_translation(self, dataset, n_samples=10, randomized=False, amortized=False):
 		random = self.rs if randomized else np.random.RandomState(seed=0)
 
 		img_idx = torch.from_numpy(random.choice(len(dataset), size=n_samples, replace=False))
