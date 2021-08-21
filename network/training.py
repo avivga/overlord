@@ -96,34 +96,34 @@ class Model:
 		self.rs = np.random.RandomState(seed=1337)
 
 	@staticmethod
-	def load(checkpoint_dir):
-		with open(os.path.join(checkpoint_dir, 'config.pkl'), 'rb') as config_fd:
+	def load(model_dir):
+		with open(os.path.join(model_dir, 'config.pkl'), 'rb') as config_fd:
 			config = pickle.load(config_fd)
 
 		model = Model(config)
 
-		if os.path.exists(os.path.join(checkpoint_dir, 'latent.pth')):
+		if os.path.exists(os.path.join(model_dir, 'latent.pth')):
 			model.latent_model = LatentModel(config)
-			model.latent_model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'latent.pth')))
+			model.latent_model.load_state_dict(torch.load(os.path.join(model_dir, 'latent.pth')))
 
-		if os.path.exists(os.path.join(checkpoint_dir, 'amortized.pth')):
+		if os.path.exists(os.path.join(model_dir, 'amortized.pth')):
 			model.amortized_model = AmortizedModel(config)
-			model.amortized_model.load_state_dict(torch.load(os.path.join(checkpoint_dir, 'amortized.pth')))
+			model.amortized_model.load_state_dict(torch.load(os.path.join(model_dir, 'amortized.pth')))
 
 		return model
 
-	def save(self, checkpoint_dir):
-		if not os.path.exists(checkpoint_dir):
-			os.mkdir(checkpoint_dir)
+	def save(self, model_dir):
+		if not os.path.exists(model_dir):
+			os.mkdir(model_dir)
 
-		with open(os.path.join(checkpoint_dir, 'config.pkl'), 'wb') as config_fd:
+		with open(os.path.join(model_dir, 'config.pkl'), 'wb') as config_fd:
 			pickle.dump(self.config, config_fd)
 
 		if self.latent_model:
-			torch.save(self.latent_model.state_dict(), os.path.join(checkpoint_dir, 'latent.pth'))
+			torch.save(self.latent_model.state_dict(), os.path.join(model_dir, 'latent.pth'))
 
 		if self.amortized_model:
-			torch.save(self.amortized_model.state_dict(), os.path.join(checkpoint_dir, 'amortized.pth'))
+			torch.save(self.amortized_model.state_dict(), os.path.join(model_dir, 'amortized.pth'))
 
 	def train_latent_model(self, imgs, labels, masks, model_dir, tensorboard_dir):
 		self.latent_model = LatentModel(self.config)
@@ -402,6 +402,52 @@ class Model:
 			self.save(model_dir)
 
 		summary.close()
+
+	@torch.no_grad()
+	def manipulate_by_reference(self, img, reference_img):
+		self.amortized_model.to(self.device)
+		self.amortized_model.eval()
+
+		img = torch.from_numpy(img.astype(np.float32) / 255.0).permute(2, 0, 1).to(self.device)
+		reference_img = torch.from_numpy(reference_img.astype(np.float32) / 255.0).permute(2, 0, 1).to(self.device)
+
+		uncorrelated_code = self.amortized_model.uncorrelated_encoder(img.unsqueeze(dim=0))[0]
+		label_code = self.amortized_model.label_encoder(reference_img.unsqueeze(dim=0))[0]
+
+		if self.config['correlation']:
+			correlated_code = self.amortized_model.correlated_encoder(reference_img.unsqueeze(dim=0))[0]
+			latent_code = torch.cat([label_code, correlated_code, uncorrelated_code], dim=0)
+		else:
+			latent_code = torch.cat([label_code, uncorrelated_code], dim=0)
+
+		manipulated_img = self.amortized_model.generator(latent_code.unsqueeze(dim=0))[0]
+		return (manipulated_img.clamp(min=0, max=1).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+
+	@torch.no_grad()
+	def manipulate_by_labels(self, img):
+		assert self.config['correlation'] is None
+
+		self.latent_model.to(self.device)
+		self.latent_model.eval()
+
+		self.amortized_model.to(self.device)
+		self.amortized_model.eval()
+
+		results = [img]
+
+		img = torch.from_numpy(img.astype(np.float32) / 255.0).permute(2, 0, 1).to(self.device)
+		uncorrelated_code = self.amortized_model.uncorrelated_encoder(img.unsqueeze(dim=0))[0]
+
+		label_values = torch.arange(self.config['n_labels'], dtype=torch.int64).to(self.device)
+		label_codes = self.latent_model.label_embedding(label_values)
+
+		for i in range(label_codes.shape[0]):
+			latent_code = torch.cat((label_codes[i], uncorrelated_code), dim=0)
+			manipulated_img = self.amortized_model.generator(latent_code.unsqueeze(dim=0))[0]
+			manipulated_img = (manipulated_img.clamp(min=0, max=1).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+			results.append(manipulated_img)
+
+		return np.concatenate(results, axis=1)
 
 	def __iterate_latent_model(self, batch):
 		label_code = self.latent_model.label_embedding(batch['label'])

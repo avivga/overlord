@@ -1,6 +1,7 @@
 import argparse
 import os
 import yaml
+import imageio
 
 import numpy as np
 
@@ -45,6 +46,21 @@ def train(args):
 	model.tune_amortized_model(imgs, labels, masks, model_dir, tensorboard_dir=os.path.join(tensorboard_dir, 'synthesis'))
 
 
+def manipulate(args):
+	assets = AssetManager(args.base_dir)
+	model_dir = assets.get_model_dir(args.model_name)
+	model = Model.load(model_dir)
+
+	img = imageio.imread(args.img_path)
+	if args.reference_img_path:
+		reference_img = imageio.imread(args.reference_img_path)
+		manipulated_img = model.manipulate_by_reference(img, reference_img)
+	else:
+		manipulated_img = model.manipulate_by_labels(img)
+
+	imageio.imwrite(args.output_img_path, manipulated_img)
+
+
 def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('-bd', '--base-dir', type=str, required=True)
@@ -63,6 +79,13 @@ def main():
 	train_parser.add_argument('-mn', '--model-name', type=str, required=True)
 	train_parser.add_argument('-cf', '--config', type=str, required=True)
 	train_parser.set_defaults(func=train)
+
+	manipulate_parser = action_parsers.add_parser('manipulate')
+	manipulate_parser.add_argument('-mn', '--model-name', type=str, required=True)
+	manipulate_parser.add_argument('-i', '--img-path', type=str, required=True)
+	manipulate_parser.add_argument('-r', '--reference-img-path', type=str, required=False)
+	manipulate_parser.add_argument('-o', '--output-img-path', type=str, required=True)
+	manipulate_parser.set_defaults(func=manipulate)
 
 	args, extras = parser.parse_known_args()
 	if len(extras) == 0:
