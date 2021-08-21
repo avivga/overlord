@@ -84,7 +84,7 @@ class CelebAHQ(DataSet):
 		return attributes, attribute_names
 
 	def read(self):
-		img_names = sorted(os.listdir(os.path.join(self._base_dir, 'x1024')))
+		img_names = sorted(os.listdir(os.path.join(self._base_dir, 'imgs')))
 		attributes_map, attribute_names = self.__read_attributes()
 
 		mask_paths = glob.glob(os.path.join(self._base_dir, 'CelebAMask-HQ', 'CelebAMask-HQ-mask-anno', '*', '*.png'))
@@ -101,7 +101,7 @@ class CelebAHQ(DataSet):
 		attributes = np.full(shape=(len(img_names), 40), fill_value=-1, dtype=np.int16)
 
 		for i, img_name in enumerate(tqdm(img_names)):
-			img_path = os.path.join(self._base_dir, 'x1024', img_name)
+			img_path = os.path.join(self._base_dir, 'imgs', img_name)
 
 			img = PIL.Image.open(img_path)
 			imgs[i] = np.array(img.resize(size=(self.img_size, self.img_size), resample=PIL.Image.BICUBIC))
@@ -146,7 +146,7 @@ class FFHQ(DataSet):
 
 		img_ids = np.arange(70000)
 		for i in tqdm(img_ids):
-			img_path = os.path.join(self._base_dir, 'imgs-x256', 'img{:08d}.png'.format(i))
+			img_path = os.path.join(self._base_dir, 'imgs', '{:05d}.png'.format(i))
 
 			img = PIL.Image.open(img_path)
 			imgs[i] = np.array(img.resize(size=(self.img_size, self.img_size), resample=PIL.Image.BICUBIC))
