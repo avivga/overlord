@@ -1,11 +1,11 @@
 labeled_attribute: domain
 correlation: pose-invariant
 
-label_dim: 256
+label_dim: 512
 correlated_dim: 64
 uncorrelated_dim: 64
 
-uncorrelated_std: 1
+uncorrelated_std: 0.1
 
 correlation_augmentation:
   scale:
@@ -28,11 +28,11 @@ disentanglement:
 
   loss_weights:
     reconstruction: 1
-    uncorrelated_decay: 0.00001
+    uncorrelated_decay: 0.1
 
 amortization:
   batch_size: 64
-  n_epochs: 50
+  n_epochs: 100
   n_epochs_between_visualizations: 5
 
   learning_rate:
