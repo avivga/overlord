@@ -416,9 +416,9 @@ class Model:
 
 		if self.config['correlation']:
 			correlated_code = self.amortized_model.correlated_encoder(reference_img.unsqueeze(dim=0))[0]
-			latent_code = torch.cat([label_code, correlated_code, uncorrelated_code], dim=0)
+			latent_code = torch.cat([uncorrelated_code, label_code, correlated_code], dim=0)
 		else:
-			latent_code = torch.cat([label_code, uncorrelated_code], dim=0)
+			latent_code = torch.cat([uncorrelated_code, label_code], dim=0)
 
 		manipulated_img = self.amortized_model.generator(latent_code.unsqueeze(dim=0))[0]
 		return (manipulated_img.clamp(min=0, max=1).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
@@ -442,7 +442,7 @@ class Model:
 		label_codes = self.latent_model.label_embedding(label_values)
 
 		for i in range(label_codes.shape[0]):
-			latent_code = torch.cat((label_codes[i], uncorrelated_code), dim=0)
+			latent_code = torch.cat([uncorrelated_code, label_codes[i]], dim=0)
 			manipulated_img = self.amortized_model.generator(latent_code.unsqueeze(dim=0))[0]
 			manipulated_img = (manipulated_img.clamp(min=0, max=1).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
 			results.append(manipulated_img)
@@ -463,9 +463,9 @@ class Model:
 
 		if self.config['correlation']:
 			correlated_code = self.latent_model.correlated_encoder(batch['img_augmented'])
-			latent_code = torch.cat((label_code, correlated_code, uncorrelated_code_regularized), dim=1)
+			latent_code = torch.cat([uncorrelated_code_regularized, label_code, correlated_code], dim=1)
 		else:
-			latent_code = torch.cat((label_code, uncorrelated_code_regularized), dim=1)
+			latent_code = torch.cat([uncorrelated_code_regularized, label_code], dim=1)
 
 		img_reconstructed = self.latent_model.generator(latent_code)
 		loss_reconstruction = self.reconstruction_loss(img_reconstructed, batch['img'])
@@ -522,9 +522,9 @@ class Model:
 			correlated_code = self.amortized_model.correlated_encoder(batch['img'])
 			loss_correlated = torch.mean((correlated_code - correlated_code_target) ** 2, dim=1).mean()
 
-			latent_code = torch.cat((label_code, correlated_code, uncorrelated_code), dim=1)
+			latent_code = torch.cat([uncorrelated_code, label_code, correlated_code], dim=1)
 		else:
-			latent_code = torch.cat((label_code, uncorrelated_code), dim=1)
+			latent_code = torch.cat([uncorrelated_code, label_code], dim=1)
 
 		img_reconstructed = self.amortized_model.generator(latent_code)
 		loss_reconstruction = self.reconstruction_loss(img_reconstructed, batch['img'])
@@ -550,9 +550,9 @@ class Model:
 
 			if self.config['correlation']:
 				correlated_code = self.amortized_model.correlated_encoder(batch['img'])
-				latent_code = torch.cat((label_code, correlated_code, uncorrelated_code), dim=1)
+				latent_code = torch.cat([uncorrelated_code, label_code, correlated_code], dim=1)
 			else:
-				latent_code = torch.cat((label_code, uncorrelated_code), dim=1)
+				latent_code = torch.cat([uncorrelated_code, label_code], dim=1)
 
 			img_reconstructed = self.amortized_model.generator(latent_code)
 
@@ -621,9 +621,9 @@ class Model:
 
 			for j in range(n_samples):
 				if self.config['correlation']:
-					latent_code = torch.cat([label_code[i], correlated_code[i], uncorrelated_code[j]], dim=0)
+					latent_code = torch.cat([uncorrelated_code[j], label_code[i], correlated_code[i]], dim=0)
 				else:
-					latent_code = torch.cat([label_code[i], uncorrelated_code[j]], dim=0)
+					latent_code = torch.cat([uncorrelated_code[j], label_code[i]], dim=0)
 
 				converted_img = generator(latent_code.unsqueeze(dim=0))
 				converted_imgs.append(converted_img[0])
