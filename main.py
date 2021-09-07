@@ -63,7 +63,7 @@ def manipulate(args):
 
 def main():
 	parser = argparse.ArgumentParser()
-	parser.add_argument('-bd', '--base-dir', type=str, required=True)
+	parser.add_argument('-bd', '--base-dir', type=str, default='.')
 
 	action_parsers = parser.add_subparsers(dest='action')
 	action_parsers.required = True
