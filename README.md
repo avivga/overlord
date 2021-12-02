@@ -1,4 +1,4 @@
-# OverLORD - Official PyTorch Implementation 
+# OverLORD - Official PyTorch Implementation
 > [Scaling-up Disentanglement for Image Translation](http://www.vision.huji.ac.il/overlord)  
 > Aviv Gabbay and Yedid Hoshen  
 > International Conference on Computer Vision (ICCV), 2021.
@@ -15,22 +15,22 @@ A framework for high-fidelity disentanglement of labeled and unlabeled attribute
 
 | Input | [0-9] | [10-19] | [50-59] | [70-79] |
 |:---:|:---:|:---:|:---:|:---:|
-|<img src="http://www.vision.huji.ac.il/overlord/img/aging/a/0-0.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/aging/a/0-1.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/aging/a/0-2.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/aging/a/0-6.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/aging/a/0-8.jpg" height="128px" width="128px">|
-|<img src="http://www.vision.huji.ac.il/overlord/img/aging/b/0-0.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/aging/b/0-1.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/aging/b/0-2.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/aging/b/0-6.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/aging/b/0-8.jpg" height="128px" width="128px">|
+|<img src="img/aging/a/0-0.jpg" height="128px" width="128px">|<img src="img/aging/a/0-1.jpg" height="128px" width="128px">|<img src="img/aging/a/0-2.jpg" height="128px" width="128px">|<img src="img/aging/a/0-6.jpg" height="128px" width="128px">|<img src="img/aging/a/0-8.jpg" height="128px" width="128px">|
+|<img src="img/aging/b/0-0.jpg" height="128px" width="128px">|<img src="img/aging/b/0-1.jpg" height="128px" width="128px">|<img src="img/aging/b/0-2.jpg" height="128px" width="128px">|<img src="img/aging/b/0-6.jpg" height="128px" width="128px">|<img src="img/aging/b/0-8.jpg" height="128px" width="128px">|
 
 - Disentanglement of labeled identity and uncorrelated unlabeled attributes (CelebA).
 
 | Identity | Attributes #1 | Translation #1 | Attributes #2 | Translation #2 |
 |:---:|:---:|:---:|:---:|:---:|
-|<img src="http://www.vision.huji.ac.il/overlord/img/identity/b/identity.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/identity/b/attributes_1.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/identity/b/translation_1.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/identity/b/attributes_2.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/identity/b/translation_2.jpg" height="112px" width="112px">|
-|<img src="http://www.vision.huji.ac.il/overlord/img/identity/a/identity.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/identity/a/attributes_1.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/identity/a/translation_1.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/identity/a/attributes_2.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/identity/a/translation_2.jpg" height="112px" width="112px">|
+|<img src="img/identity/b/identity.jpg" height="112px" width="112px">|<img src="img/identity/b/attributes_1.jpg" height="112px" width="112px">|<img src="img/identity/b/translation_1.jpg" height="112px" width="112px">|<img src="img/identity/b/attributes_2.jpg" height="112px" width="112px">|<img src="img/identity/b/translation_2.jpg" height="112px" width="112px">|
+|<img src="img/identity/a/identity.jpg" height="112px" width="112px">|<img src="img/identity/a/attributes_1.jpg" height="112px" width="112px">|<img src="img/identity/a/translation_1.jpg" height="112px" width="112px">|<img src="img/identity/a/attributes_2.jpg" height="112px" width="112px">|<img src="img/identity/a/translation_2.jpg" height="112px" width="112px">|
 
 - Disentanglement of labeled shape (edge map) and unlabeled texture (Edges2Shoes).
 
 | Texture | Shape #1 | Translation #1 | Shape #2 | Translation #2 |
 |:---:|:---:|:---:|:---:|:---:|
-|<img src="http://www.vision.huji.ac.il/overlord/img/shape-texture/a/texture.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/shape-texture/a/shape_1.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/shape-texture/a/translation_1.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/shape-texture/a/shape_2.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/shape-texture/a/translation_2.jpg" height="112px" width="112px">|
-|<img src="http://www.vision.huji.ac.il/overlord/img/shape-texture/b/texture.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/shape-texture/b/shape_1.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/shape-texture/b/translation_1.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/shape-texture/b/shape_2.jpg" height="112px" width="112px">|<img src="http://www.vision.huji.ac.il/overlord/img/shape-texture/b/translation_2.jpg" height="112px" width="112px">|
+|<img src="img/shape-texture/a/texture.jpg" height="112px" width="112px">|<img src="img/shape-texture/a/shape_1.jpg" height="112px" width="112px">|<img src="img/shape-texture/a/translation_1.jpg" height="112px" width="112px">|<img src="img/shape-texture/a/shape_2.jpg" height="112px" width="112px">|<img src="img/shape-texture/a/translation_2.jpg" height="112px" width="112px">|
+|<img src="img/shape-texture/b/texture.jpg" height="112px" width="112px">|<img src="img/shape-texture/b/shape_1.jpg" height="112px" width="112px">|<img src="img/shape-texture/b/translation_1.jpg" height="112px" width="112px">|<img src="img/shape-texture/b/shape_2.jpg" height="112px" width="112px">|<img src="img/shape-texture/b/translation_2.jpg" height="112px" width="112px">|
 
 ### Case 2: Correlated Labeled and Unlabeled Attributes
 - Disentanglement of domain label (cat, dog or wild), correlated appearance and *uncorrelated pose*.
@@ -39,15 +39,15 @@ facial shapes which are unique to the source domain. We disentangle the pose and
 
 | Pose | Appearance | FUNIT | StarGAN-v2 | Ours |
 |:---:|:---:|:---:|:---:|:---:|
-|<img src="http://www.vision.huji.ac.il/overlord/img/pose-appearance/a/pose.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/pose-appearance/a/appearance.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/pose-appearance/a/funit.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/pose-appearance/a/stargan-v2.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/pose-appearance/a/ours.jpg" height="128px" width="128px">|
-|<img src="http://www.vision.huji.ac.il/overlord/img/pose-appearance/b/pose.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/pose-appearance/b/appearance.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/pose-appearance/b/funit.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/pose-appearance/b/stargan-v2.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/pose-appearance/b/ours.jpg" height="128px" width="128px">|
+|<img src="img/pose-appearance/a/pose.jpg" height="128px" width="128px">|<img src="img/pose-appearance/a/appearance.jpg" height="128px" width="128px">|<img src="img/pose-appearance/a/funit.jpg" height="128px" width="128px">|<img src="img/pose-appearance/a/stargan-v2.jpg" height="128px" width="128px">|<img src="img/pose-appearance/a/ours.jpg" height="128px" width="128px">|
+|<img src="img/pose-appearance/b/pose.jpg" height="128px" width="128px">|<img src="img/pose-appearance/b/appearance.jpg" height="128px" width="128px">|<img src="img/pose-appearance/b/funit.jpg" height="128px" width="128px">|<img src="img/pose-appearance/b/stargan-v2.jpg" height="128px" width="128px">|<img src="img/pose-appearance/b/ours.jpg" height="128px" width="128px">|
 
-- Male-to-Female translation in two settings: (i) When the gender is assumed to be *approximately uncorrelated* with all the unlabeled attributes. (ii) When we model the hairstyle as *localized correlation* and utilize a reference image specifying its target. 
+- Male-to-Female translation in two settings: (i) When the gender is assumed to be *approximately uncorrelated* with all the unlabeled attributes. (ii) When we model the hairstyle as *localized correlation* and utilize a reference image specifying its target.
 
 | Input | Ours [uncorrelated] | Reference | StarGAN-v2 | Ours [correlated] |
 |:---:|:---:|:---:|:---:|:---:|
-|<img src="http://www.vision.huji.ac.il/overlord/img/localized/a/input.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/localized/a/ours-uncorrelated.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/localized/a/hairstyle.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/localized/a/stargan-v2.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/localized/a/ours-correlated.jpg" height="128px" width="128px">|
-|<img src="http://www.vision.huji.ac.il/overlord/img/localized/c/input.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/localized/c/ours-uncorrelated.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/localized/c/hairstyle.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/localized/c/stargan-v2.jpg" height="128px" width="128px">|<img src="http://www.vision.huji.ac.il/overlord/img/localized/c/ours-correlated.jpg" height="128px" width="128px">|
+|<img src="img/localized/a/input.jpg" height="128px" width="128px">|<img src="img/localized/a/ours-uncorrelated.jpg" height="128px" width="128px">|<img src="img/localized/a/hairstyle.jpg" height="128px" width="128px">|<img src="img/localized/a/stargan-v2.jpg" height="128px" width="128px">|<img src="img/localized/a/ours-correlated.jpg" height="128px" width="128px">|
+|<img src="img/localized/c/input.jpg" height="128px" width="128px">|<img src="img/localized/c/ours-uncorrelated.jpg" height="128px" width="128px">|<img src="img/localized/c/hairstyle.jpg" height="128px" width="128px">|<img src="img/localized/c/stargan-v2.jpg" height="128px" width="128px">|<img src="img/localized/c/ours-correlated.jpg" height="128px" width="128px">|
 
 ## Requirements
 ![python 3.7](https://img.shields.io/badge/python-3.7-blue.svg)
@@ -133,7 +133,7 @@ Given a trained model (either pretrained or trained from scratch), a test image 
 ```
 python main.py manipulate --model-name overlord-ffhq-x256-age --img face.png --output face_in_all_ages.png
 python main.py manipulate --model-name overlord-celeba-x128-identity --img attributes.png --reference identity.png --output translation.png
-python main.py manipulate --model-name overlord-afhq-x256 --img pose.png --reference appearance.png --output translation.png 
+python main.py manipulate --model-name overlord-afhq-x256 --img pose.png --reference appearance.png --output translation.png
 python main.py manipulate --model-name overlord-celebahq-x256-gender --img face.png --output face_in_all_genders.png
 python main.py manipulate --model-name overlord-celebahq-x256-gender-hair --img face.png --reference hairstyle.png --output translation.png
 ```
